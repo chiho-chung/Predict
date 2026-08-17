@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bbox_ekf.hpp"
+#include "bbox_imm_ekf.hpp"
 #include "math/linalg.hpp"
 #include "sim/drone_model.hpp"
 #include "sim/types.hpp"
@@ -47,6 +48,7 @@ bool estimator_uses_bbox(EstimatorType t);
 bool estimator_is_imm(EstimatorType t);
 bool estimator_is_unscented(EstimatorType t);
 bool estimator_is_export(EstimatorType t);
+bool estimator_is_export_imm(EstimatorType t);
 
 // A detection, tagged with everything needed to interpret it: the camera pose it
 // was captured with, own velocity, and the frame TIMESTAMP. Predictors never
@@ -125,7 +127,8 @@ class Tracker {
 
   TrackerConfig cfg_{};
   BBoxPredictor px_;  // always fed, so the baseline stays available
-  bbox_ekf::BBoxEkf export_;  // EstimatorType::ExportEkf
+  bbox_ekf::BBoxEkf export_;           // EstimatorType::ExportEkf
+  bbox_imm_ekf::BBoxImmEkf export_imm_;  // EstimatorType::ExportImmEkf
 
   TargetFilter models_[kMaxModels];
   double weight_[kMaxModels]{};

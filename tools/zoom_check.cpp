@@ -80,6 +80,8 @@ int main() {
   std::printf("zoom check  20s  10Hz  timing on  ideal gimbal\n");
   run("fixed 1x", EstimatorType::ExportEkf, false);
   run("cycle 1-3x", EstimatorType::ExportEkf, true);
+  run("fixed 1x", EstimatorType::ExportImmEkf, false);
+  run("cycle 1-3x", EstimatorType::ExportImmEkf, true);
   run("fixed 1x", EstimatorType::Ekf, false);
   run("cycle 1-3x", EstimatorType::Ekf, true);
   run("fixed 1x", EstimatorType::ImmEkf, false);

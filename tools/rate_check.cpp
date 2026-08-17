@@ -172,8 +172,9 @@ void print_table(const char* title, float horizon_s, int steps,
               "estPx", "heldPx", "losHdg", "losAtt", "rngRMS", "rngPeak",
               "rngBias", "sizeRMS", "rej", "model mix");
   const EstimatorType types[] = {
-      EstimatorType::CvPixel, EstimatorType::ExportEkf, EstimatorType::Ekf,
-      EstimatorType::Ukf,     EstimatorType::ImmEkf,    EstimatorType::ImmUkf};
+      EstimatorType::CvPixel, EstimatorType::ExportEkf,
+      EstimatorType::ExportImmEkf, EstimatorType::Ekf, EstimatorType::Ukf,
+      EstimatorType::ImmEkf, EstimatorType::ImmUkf};
   for (EstimatorType t : types) {
     const Result r = run(t, horizon_s, steps, maneuver);
     std::printf("%-11s %7.2f %7.2f %7.3f %7.3f", r.name, r.est_px, r.held_px,

@@ -235,3 +235,5 @@ g++ -std=c++17 -O2 -c bbox_ekf.cpp -o bbox_ekf.o
 ```
 
 Then link `bbox_ekf.o` into the other project.
+
+The IMM of this filter lives in `export/bbox_imm_ekf/` (same measurements).

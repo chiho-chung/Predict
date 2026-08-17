@@ -64,6 +64,7 @@ const char* estimator_name(EstimatorType t) {
   switch (t) {
     case EstimatorType::CvPixel: return "CV-pixel";
     case EstimatorType::ExportEkf: return "Export-EKF";
+    case EstimatorType::ExportImmEkf: return "Export-IMM";
     case EstimatorType::Ekf: return "EKF";
     case EstimatorType::Ukf: return "UKF";
     case EstimatorType::ImmEkf: return "IMM-EKF";
@@ -81,9 +82,9 @@ bool estimator_uses_filter(EstimatorType t) {
 }
 
 bool estimator_uses_bbox(EstimatorType t) {
-  return t == EstimatorType::ExportEkf || t == EstimatorType::Ekf ||
-         t == EstimatorType::Ukf || t == EstimatorType::ImmEkf ||
-         t == EstimatorType::ImmUkf;
+  return t == EstimatorType::ExportEkf || t == EstimatorType::ExportImmEkf ||
+         t == EstimatorType::Ekf || t == EstimatorType::Ukf ||
+         t == EstimatorType::ImmEkf || t == EstimatorType::ImmUkf;
 }
 
 bool estimator_is_imm(EstimatorType t) {
@@ -97,7 +98,11 @@ bool estimator_is_unscented(EstimatorType t) {
 }
 
 bool estimator_is_export(EstimatorType t) {
-  return t == EstimatorType::ExportEkf;
+  return t == EstimatorType::ExportEkf || t == EstimatorType::ExportImmEkf;
+}
+
+bool estimator_is_export_imm(EstimatorType t) {
+  return t == EstimatorType::ExportImmEkf;
 }
 
 namespace {
@@ -177,6 +182,44 @@ bbox_ekf::Camera export_cam_of(const CameraFrame& cam) {
   return bbox_ekf::Camera::from_fx(cam.width, cam.height, cam.fx, cam.fy);
 }
 
+bbox_imm_ekf::Config export_imm_cfg_of(const TrackerConfig& cfg) {
+  bbox_imm_ekf::Config out;
+  out.sigma_px_center = cfg.sigma_px_center;
+  out.sigma_px_size = cfg.sigma_px_size;
+  out.sigma_own_vel = cfg.sigma_own_vel;
+  out.size_prior_m = cfg.size_prior_m;
+  out.size_prior_sigma_m = cfg.size_prior_sigma_m;
+  out.size_walk = cfg.size_walk;
+  out.gate_chi2 = cfg.gate_chi2;
+  out.sigma_accel = cfg.sigma_accel;
+  out.meas_corr = cfg.meas_corr;
+  out.meas_corr_tau_s = cfg.meas_corr_tau_s;
+  out.meas_bias_sigma_px = cfg.meas_bias_sigma_px;
+  out.imm_sigma_accel[0] = cfg.imm_sigma_accel[0];
+  out.imm_sigma_accel[1] = cfg.imm_sigma_accel[1];
+  out.imm_sigma_accel[2] = cfg.imm_sigma_accel[2];
+  out.imm_stay_prob = cfg.imm_stay_prob;
+  return out;
+}
+
+bbox_imm_ekf::Meas export_imm_meas_of(const TrackerMeas& m) {
+  const LosAngles los = los_from_box(m.cam, m.box);
+  bbox_imm_ekf::Meas out;
+  out.heading_deg = los.heading_deg;
+  out.attack_deg = los.attack_deg;
+  out.width_px = m.box.width();
+  out.height_px = m.box.height();
+  out.cam = bbox_imm_ekf::Camera::from_fx(m.cam.width, m.cam.height, m.cam.fx,
+                                          m.cam.fy);
+  out.own_vel = {m.own_vel.x, m.own_vel.y, m.own_vel.z};
+  out.t = m.t;
+  return out;
+}
+
+bbox_imm_ekf::Camera export_imm_cam_of(const CameraFrame& cam) {
+  return bbox_imm_ekf::Camera::from_fx(cam.width, cam.height, cam.fx, cam.fy);
+}
+
 TrackEstimate track_from_export(const bbox_ekf::Estimate& e,
                                 const CameraFrame& cam_query) {
   TrackEstimate out;
@@ -207,6 +250,27 @@ TrackEstimate track_from_export(const bbox_ekf::Estimate& e,
   out.box.u1 = static_cast<float>(u + 0.5 * w);
   out.box.v0 = static_cast<float>(v - 0.5 * h);
   out.box.v1 = static_cast<float>(v + 0.5 * h);
+  return out;
+}
+
+TrackEstimate track_from_imm(const bbox_imm_ekf::Estimate& e,
+                             const CameraFrame& cam_query) {
+  bbox_ekf::Estimate d;
+  d.valid = e.valid;
+  d.box.u0 = e.box.u0;
+  d.box.v0 = e.box.v0;
+  d.box.u1 = e.box.u1;
+  d.box.v1 = e.box.v1;
+  d.pos_rel = {e.pos_rel.x, e.pos_rel.y, e.pos_rel.z};
+  d.vel_world = {e.vel_world.x, e.vel_world.y, e.vel_world.z};
+  d.range_m = e.range_m;
+  d.range_sigma_m = e.range_sigma_m;
+  d.size_w_m = e.size_w_m;
+  d.size_h_m = e.size_h_m;
+  d.speed_mps = e.speed_mps;
+  TrackEstimate out = track_from_export(d, cam_query);
+  out.model_count = e.model_count;
+  for (int i = 0; i < 3; ++i) out.model_prob[i] = e.model_prob[i];
   return out;
 }
 
@@ -577,6 +641,8 @@ void Tracker::reset() {
   px_.reset();
   export_.set_config(export_cfg_of(cfg_));
   export_.reset();
+  export_imm_.set_config(export_imm_cfg_of(cfg_));
+  export_imm_.reset();
   for (int i = 0; i < kMaxModels; ++i) {
     models_[i] = TargetFilter{};
     weight_[i] = 0.0;
@@ -598,10 +664,13 @@ void Tracker::set_config(const TrackerConfig& cfg) {
                        (estimator_uses_bbox(cfg.type) !=
                         estimator_uses_bbox(cfg_.type)) ||
                        (estimator_is_export(cfg.type) !=
-                        estimator_is_export(cfg_.type));
+                        estimator_is_export(cfg_.type)) ||
+                       (estimator_is_export_imm(cfg.type) !=
+                        estimator_is_export_imm(cfg_.type));
   cfg_ = cfg;
   px_.set_smoothing(cfg_.vel_smooth);
   export_.set_config(export_cfg_of(cfg_));
+  export_imm_.set_config(export_imm_cfg_of(cfg_));
   if (restart) {
     reset();
   } else {
@@ -612,6 +681,7 @@ void Tracker::set_config(const TrackerConfig& cfg) {
 bool Tracker::ready() const {
   if (!have_track_) return false;
   if (!estimator_uses_filter(cfg_.type)) return px_.ready();
+  if (estimator_is_export_imm(cfg_.type)) return export_imm_.ready();
   if (estimator_is_export(cfg_.type)) return export_.ready();
   for (int i = 0; i < n_models_; ++i) {
     if (models_[i].valid) return true;
@@ -633,6 +703,15 @@ void Tracker::push(const TrackerMeas& m) {
     have_track_ = true;
     t_filter_ = m.t;
     ++updates_;
+    return;
+  }
+
+  if (estimator_is_export_imm(cfg_.type)) {
+    export_imm_.push(export_imm_meas_of(m));
+    have_track_ = export_imm_.ready();
+    t_filter_ = static_cast<float>(export_imm_.last_stamp());
+    updates_ = export_imm_.update_count();
+    rejects_ = export_imm_.reject_count();
     return;
   }
 
@@ -789,6 +868,13 @@ TrackEstimate Tracker::at(const CameraFrame& cam_query, const Vec3& own_vel,
     out.box = px_.at(t_now, lead_s);
     out.valid = true;
     return out;
+  }
+
+  if (estimator_is_export_imm(cfg_.type)) {
+    const bbox_imm_ekf::Vec3 vel{own_vel.x, own_vel.y, own_vel.z};
+    const bbox_imm_ekf::Estimate e =
+        export_imm_.predict(export_imm_cam_of(cam_query), vel, t_now + lead_s);
+    return track_from_imm(e, cam_query);
   }
 
   if (estimator_is_export(cfg_.type)) {

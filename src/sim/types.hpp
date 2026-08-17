@@ -151,6 +151,7 @@ struct TimingConfig {
 enum class EstimatorType {
   CvPixel = 0,  // image-space constant velocity (baseline)
   ExportEkf,    // export BBoxEkf: world LOS + box size (default)
+  ExportImmEkf, // export BBoxImmEkf: 3-hypothesis IMM of that EKF
   Ekf,          // origin pose-based EKF (comparison)
   Ukf,
   ImmEkf,       // origin IMM-EKF (comparison)

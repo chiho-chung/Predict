@@ -12,10 +12,10 @@ set "PATH=%MSYS%;%PATH%"
 if not exist build mkdir build
 
 echo Compiling drone_chase_sim...
-g++ -std=c++17 -O2 -Wall -Wextra -Isrc -Iexport/bbox_ekf ^
+g++ -std=c++17 -O2 -Wall -Wextra -Isrc -Iexport/bbox_ekf -Iexport/bbox_imm_ekf ^
   src\app\main.cpp src\sim\sim.cpp src\ui\render.cpp src\estimator\predictor.cpp ^
   src\ui\plot.cpp src\io\csv_log.cpp src\app\bench.cpp src\ui\history.cpp ^
-  export\bbox_ekf\bbox_ekf.cpp ^
+  export\bbox_ekf\bbox_ekf.cpp export\bbox_imm_ekf\bbox_imm_ekf.cpp ^
   -o build\drone_chase_sim.exe ^
   -static -static-libgcc -static-libstdc++ ^
   -lgdi32 -luser32

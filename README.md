@@ -50,7 +50,7 @@ last summary row.
 | `scenarios.csv` | generated environments (motion, Hz, delay, bbox jitter, **frame timing**, spawn, seed) |
 | `summary.csv` | one row per scenario × estimator (RMS after 2 s warmup) |
 | `compare.csv` | bbox vs LOS-only paired on the **same** tape |
-| `chosen_ekf.csv` | Export-EKF (default), origin EKF, and IMM-EKF |
+| `chosen_ekf.csv` | Export-EKF, Export-IMM, origin EKF, and IMM-EKF |
 | `tapes/sXX_meas.csv` | shared detection tape, including per-frame timestamps |
 | `runs/sXX_<estimator>.csv` | 100 Hz timeseries for that replay |
 
@@ -241,19 +241,21 @@ Include path is `-Isrc`. Headers are `"sim/sim.hpp"`, `"estimator/predictor.hpp"
 
 ## Estimator
 
-`src/estimator/predictor.hpp` / `src/estimator/predictor.cpp` holds ten selectable
+`src/estimator/predictor.hpp` / `src/estimator/predictor.cpp` holds eleven selectable
 estimators. Cycle them at runtime with `E` / `W`. **Export-EKF** is the default
 (the drop-in `export/bbox_ekf` filter: world LOS + box size, no camera attitude).
+**Export-IMM** is the 3-hypothesis IMM of that same model (`export/bbox_imm_ekf`).
 Origin **EKF** and **IMM-EKF** stay in the cycle for comparison. All of them
 consume the per-frame timestamp.
 
-To drop the bbox EKF into another project, copy `export/bbox_ekf/`
-(`bbox_ekf.hpp` + `bbox_ekf.cpp`). See that folder’s README for the API.
+To drop a filter into another project, copy `export/bbox_ekf/` or
+`export/bbox_imm_ekf/` (hpp + cpp). See that folder’s README for the API.
 
 | Type | Measurement | What it is |
 |---|---|---|
 | `CV-pixel` | box centre + size (pixels) | image-space constant velocity (baseline) |
 | `Export-EKF` | LOS + box size | **default.** export `BBoxEkf`, world heading/attack + fx |
+| `Export-IMM` | LOS + box size | export `BBoxImmEkf`, quiet/mod/hard accel bank |
 | `EKF` | bbox | origin 12-state pose-based filter (comparison) |
 | `UKF` | bbox | same origin model, Julier unscented update (`kappa = 3`) |
 | `IMM-EKF` | bbox | origin 3-hypothesis IMM, EKF updates (comparison) |
