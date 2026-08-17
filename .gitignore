@@ -17,3 +17,4 @@ compile_commands.json
 
 # Agent notes
 AGENTS.md
+.cursor/
