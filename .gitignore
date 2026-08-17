@@ -1,0 +1,16 @@
+# Build outputs (build.bat, g++, CMake)
+/build/
+*.o
+*.obj
+*.exe
+*.pdb
+*.ilk
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CMakeUserPresets.json
+Makefile
+compile_commands.json
+
+# Experiment / bench logs
+/logs/
