@@ -299,6 +299,11 @@ struct SimSnapshot {
 
   TrackEstimate track_now;   // filter at t=now
   TrackEstimate track_pred;  // filter at t=now+horizon
+  // +H LOS error: predicted angles from time t scored against origin at t+H.
+  // Invalid until `horizon_s` of history has elapsed.
+  float pred_err_hdg = 0;
+  float pred_err_att = 0;
+  bool pred_err_valid = false;
   float true_range_m = 0;
   float range_err_m = 0;     // |estimated range - true range|
   float size_err_m = 0;      // |estimated width - true width|

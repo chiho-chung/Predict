@@ -54,7 +54,7 @@ struct RollAcc {
 };
 
 struct LiveRms {
-  RollAcc est_px, held_px, los_h, los_a, range, size;
+  RollAcc est_px, held_px, los_h, los_a, range, size, pred_h, pred_a;
   float last_t = -1.0f;
   void feed(const SimSnapshot& snap) {
     if (snap.time + 1e-4f < last_t) {
@@ -64,6 +64,8 @@ struct LiveRms {
       los_a.reset();
       range.reset();
       size.reset();
+      pred_h.reset();
+      pred_a.reset();
     }
     last_t = snap.time;
     if (snap.time < 2.0f) return;
@@ -78,6 +80,10 @@ struct LiveRms {
       while (dh < -180) dh += 360;
       los_h.add(dh);
       los_a.add(da);
+    }
+    if (snap.pred_err_valid) {
+      pred_h.add(snap.pred_err_hdg);
+      pred_a.add(snap.pred_err_att);
     }
     if (snap.track_now.valid && snap.track_now.range_m > 0.1f) {
       range.add(snap.track_now.range_m - snap.true_range_m);
@@ -894,6 +900,9 @@ void Renderer::render_hud(const SimSnapshot& snap, const SimConfig& cfg) {
   std::snprintf(line, sizeof(line), "LOS hdg %.3f deg   att %.3f deg",
                 g_live.los_h.rms(), g_live.los_a.rms());
   add(line);
+  std::snprintf(line, sizeof(line), "+H  hdg %.3f deg   att %.3f deg",
+                g_live.pred_h.rms(), g_live.pred_a.rms());
+  add(line, kColBoxPred);
   std::snprintf(line, sizeof(line), "range %.2f m   size %.3f m",
                 g_live.range.rms(), g_live.size.rms());
   add(line, kColBoxPred);

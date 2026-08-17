@@ -51,11 +51,13 @@ class Simulation {
   float sample_latency();
   float sample_stamp(float t_true);
   void update_los(const Detection& truth, const Detection& est,
-                  const Detection& pred);
+                  const Detection& pred, const TrackEstimate& est_t,
+                  const TrackEstimate& pred_t);
   Detection project_target(const Vec3& target_pos) const;
   Detection apply_bbox_jitter(const Detection& clean);
   Vec3 predict_target_world(float horizon_s) const;
   Vec3 camera_position() const;
+  Vec3 predicted_own_disp(float horizon_s, const TrackEstimate& est) const;
   CameraFrame current_camera() const;
 
   SimConfig cfg_;
@@ -108,4 +110,14 @@ class Simulation {
   float jit_dw_ = 0;
   float jit_dh_ = 0;
   uint32_t rng_ = 0xC0FFEEu;
+
+  static constexpr int kLosHist = 400;
+  LosAngles origin_hist_[kLosHist]{};
+  LosAngles pred_hist_[kLosHist]{};
+  int los_hist_i_ = 0;
+  int los_hist_n_ = 0;
+
+  // Camera position at the last detection stamp (for IMU-accurate own_disp).
+  Vec3 filter_cam_pos_{};
+  bool have_filter_cam_pos_ = false;
 };

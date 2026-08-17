@@ -146,6 +146,12 @@ double vec_comp(const Vec3& v, int i) {
   return (i == 0) ? v.x : (i == 1) ? v.y : v.z;
 }
 
+Vec3 own_step(const Vec3& own_vel, double dt, const Vec3* own_disp) {
+  if (own_disp) return *own_disp;
+  const float t = static_cast<float>(dt);
+  return Vec3{own_vel.x * t, own_vel.y * t, own_vel.z * t};
+}
+
 bool use_meas_bias(const TrackerConfig& cfg) { return cfg.meas_corr >= 0.05f; }
 
 bbox_ekf::Config export_cfg_of(const TrackerConfig& cfg) {
@@ -378,15 +384,47 @@ bool state_is_finite(const Vec<N>& x) {
   return true;
 }
 
-// Relative position integrates (target velocity - own velocity); target
+void prevent_through_origin(Vec<N>& x, double dt, const Vec3& dp_own) {
+  if (dt <= 0.2) return;
+  Vec3 p{static_cast<float>(x(0, 0)), static_cast<float>(x(1, 0)),
+         static_cast<float>(x(2, 0))};
+  Vec3 p0{static_cast<float>(x(0, 0) - dt * x(3, 0) + dp_own.x),
+          static_cast<float>(x(1, 0) - dt * x(4, 0) + dp_own.y),
+          static_cast<float>(x(2, 0) - dt * x(5, 0) + dp_own.z)};
+  const double r0 = p0.length();
+  const double r1 = p.length();
+  if (r0 < 0.4) return;
+  const double toward = p0.x * p.x + p0.y * p.y + p0.z * p.z;
+  if (toward > 0.05 * r0 * r1 && r1 > 0.4 * r0) return;
+  const float inv_dt = 1.0f / static_cast<float>(dt);
+  const float inv = 1.0f / static_cast<float>(r0);
+  const Vec3 u = p0 * inv;
+  const Vec3 vrel{static_cast<float>(x(3, 0)) - dp_own.x * inv_dt,
+                  static_cast<float>(x(4, 0)) - dp_own.y * inv_dt,
+                  static_cast<float>(x(5, 0)) - dp_own.z * inv_dt};
+  const float vrad = vrel.dot(u);
+  const Vec3 vperp = vrel - u * vrad;
+  Vec3 pn = p0 + vperp * static_cast<float>(dt);
+  const float rn = pn.length();
+  if (rn < 1e-4f) pn = u * static_cast<float>(r0);
+  else pn = pn * static_cast<float>(r0 / rn);
+  x(0, 0) = pn.x;
+  x(1, 0) = pn.y;
+  x(2, 0) = pn.z;
+}
+
+// Relative position integrates (target velocity - own motion); target
 // velocity and extent hold. Linear in the state, so this is exact.
 void predict_linear(Vec<N>& x, Mat<N, N>& P, double dt, const Vec3& own_vel,
-                    const TrackerConfig& cfg, double sigma_accel) {
+                    const TrackerConfig& cfg, double sigma_accel,
+                    const Vec3* own_disp = nullptr) {
   if (dt <= 0) return;
 
+  const Vec3 dp = own_step(own_vel, dt, own_disp);
   for (int i = 0; i < 3; ++i) {
-    x(i, 0) += dt * (x(3 + i, 0) - vec_comp(own_vel, i));
+    x(i, 0) += dt * x(3 + i, 0) - vec_comp(dp, i);
   }
+  prevent_through_origin(x, dt, dp);
 
   Mat<N, N> F = la::identity<N>();
   for (int i = 0; i < 3; ++i) F(i, 3 + i) = dt;
@@ -892,7 +930,8 @@ void Tracker::mix_states(Vec<N>& x_out, Mat<N, N>& P_out) const {
 }
 
 TrackEstimate Tracker::at(const CameraFrame& cam_query, const Vec3& own_vel,
-                          float t_now, float lead_s) const {
+                          float t_now, float lead_s,
+                          const Vec3* own_disp) const {
   TrackEstimate out;
   if (!have_track_) return out;
 
@@ -905,15 +944,26 @@ TrackEstimate Tracker::at(const CameraFrame& cam_query, const Vec3& own_vel,
 
   if (estimator_is_export_imm(cfg_.type)) {
     const bbox_imm_ekf::Vec3 vel{own_vel.x, own_vel.y, own_vel.z};
-    const bbox_imm_ekf::Estimate e =
-        export_imm_.predict(export_imm_cam_of(cam_query), vel, t_now + lead_s);
+    bbox_imm_ekf::Estimate e;
+    if (own_disp) {
+      const bbox_imm_ekf::Vec3 disp{own_disp->x, own_disp->y, own_disp->z};
+      e = export_imm_.predict(export_imm_cam_of(cam_query), vel,
+                              t_now + lead_s, disp);
+    } else {
+      e = export_imm_.predict(export_imm_cam_of(cam_query), vel, t_now + lead_s);
+    }
     return track_from_imm(e, cam_query);
   }
 
   if (estimator_is_export(cfg_.type)) {
     const bbox_ekf::Vec3 vel{own_vel.x, own_vel.y, own_vel.z};
-    const bbox_ekf::Estimate e =
-        export_.predict(export_cam_of(cam_query), vel, t_now + lead_s);
+    bbox_ekf::Estimate e;
+    if (own_disp) {
+      const bbox_ekf::Vec3 disp{own_disp->x, own_disp->y, own_disp->z};
+      e = export_.predict(export_cam_of(cam_query), vel, t_now + lead_s, disp);
+    } else {
+      e = export_.predict(export_cam_of(cam_query), vel, t_now + lead_s);
+    }
     return track_from_export(e, cam_query);
   }
 
@@ -928,7 +978,7 @@ TrackEstimate Tracker::at(const CameraFrame& cam_query, const Vec3& own_vel,
   dt = std::min(std::max(dt, 0.0), 3.0);
   // Only the covariance depends on which sigma is used here; the mean is
   // identical for every model because the dynamics are linear and shared.
-  predict_linear(x, P, dt, own_vel, cfg_, cfg_.sigma_accel);
+  predict_linear(x, P, dt, own_vel, cfg_, cfg_.sigma_accel, own_disp);
   if (!state_is_finite(x)) return out;
 
   const ProjModel pm = proj_of(cam_query);

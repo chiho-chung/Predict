@@ -160,6 +160,15 @@ inline LosAngles los_from_box(const CameraFrame& cam, const BBox& box) {
   return los_from_dir(unproject_dir(cam, c.x, c.y));
 }
 
+// World LOS from a relative position (target minus camera). Use this for
+// filter output: it does not go through a pixel projection, so a +H coast
+// that has left the current FOV still has a well-defined heading/attack.
+inline LosAngles los_from_rel(const Vec3& pos_rel) {
+  const float len = pos_rel.length();
+  if (len < 1e-4f) return {};
+  return los_from_dir(pos_rel * (1.0f / len));
+}
+
 // Axis-aligned bbox from projected drone mesh samples.
 inline Detection fit_bbox_from_model(const CameraFrame& cam,
                                      const DroneModel::Pose& pose) {

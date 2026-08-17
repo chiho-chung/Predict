@@ -135,6 +135,12 @@ double comp(const Vec3& v, int i) {
   return (i == 0) ? v.x : (i == 1) ? v.y : v.z;
 }
 
+Vec3 own_step(const Vec3& own_vel, double dt, const Vec3* own_disp) {
+  if (own_disp) return *own_disp;
+  const float t = static_cast<float>(dt);
+  return Vec3{own_vel.x * t, own_vel.y * t, own_vel.z * t};
+}
+
 double wrap_pi(double a) {
   while (a > kPi) a -= 2.0 * kPi;
   while (a < -kPi) a += 2.0 * kPi;
@@ -276,12 +282,44 @@ void unpack(const Vec<N>& xv, const Mat<N, N>& Pv, double x[N],
   }
 }
 
+void prevent_through_origin(Vec<N>& x, double dt, const Vec3& dp_own) {
+  if (dt <= 0.2) return;
+  Vec3 p{static_cast<float>(x(0, 0)), static_cast<float>(x(1, 0)),
+         static_cast<float>(x(2, 0))};
+  Vec3 p0{static_cast<float>(x(0, 0) - dt * x(3, 0) + dp_own.x),
+          static_cast<float>(x(1, 0) - dt * x(4, 0) + dp_own.y),
+          static_cast<float>(x(2, 0) - dt * x(5, 0) + dp_own.z)};
+  const double r0 = p0.length();
+  const double r1 = p.length();
+  if (r0 < 0.4) return;
+  const double toward = p0.x * p.x + p0.y * p.y + p0.z * p.z;
+  if (toward > 0.05 * r0 * r1 && r1 > 0.4 * r0) return;
+  const float inv_dt = 1.0f / static_cast<float>(dt);
+  const float inv = 1.0f / static_cast<float>(r0);
+  const Vec3 u = p0 * inv;
+  const Vec3 vrel{static_cast<float>(x(3, 0)) - dp_own.x * inv_dt,
+                  static_cast<float>(x(4, 0)) - dp_own.y * inv_dt,
+                  static_cast<float>(x(5, 0)) - dp_own.z * inv_dt};
+  const float vrad = vrel.dot(u);
+  const Vec3 vperp = vrel - u * vrad;
+  Vec3 pn = p0 + vperp * static_cast<float>(dt);
+  const float rn = pn.length();
+  if (rn < 1e-4f) pn = u * static_cast<float>(r0);
+  else pn = pn * static_cast<float>(r0 / rn);
+  x(0, 0) = pn.x;
+  x(1, 0) = pn.y;
+  x(2, 0) = pn.z;
+}
+
 void predict_linear(Vec<N>& x, Mat<N, N>& P, double dt, const Vec3& own_vel,
-                    const Config& cfg, double sigma_accel) {
+                    const Config& cfg, double sigma_accel,
+                    const Vec3* own_disp = nullptr) {
   if (dt <= 0) return;
+  const Vec3 dp = own_step(own_vel, dt, own_disp);
   for (int i = 0; i < 3; ++i) {
-    x(i, 0) += dt * (x(3 + i, 0) - comp(own_vel, i));
+    x(i, 0) += dt * x(3 + i, 0) - comp(dp, i);
   }
+  prevent_through_origin(x, dt, dp);
   Mat<N, N> F = identity<N>();
   for (int i = 0; i < 3; ++i) F(i, 3 + i) = dt;
   P = symmetrize<N>(F * P * transpose(F));
@@ -760,7 +798,31 @@ Estimate BBoxImmEkf::predict(const Camera& cam_query, const Vec3& own_vel,
   double dt = t_query - t_;
   dt = std::min(std::max(dt, 0.0), 3.0);
   predict_linear(x, P, dt, own_vel, cfg_,
-                 static_cast<double>(cfg_.sigma_accel));
+                 static_cast<double>(cfg_.sigma_accel), nullptr);
+  if (!finite_state(x)) return out;
+  out = pack_estimate(x, P, cam_query, cfg_, last_range_bias_known_);
+  for (int i = 0; i < kModels; ++i) out.model_prob[i] = model_prob_[i];
+  return out;
+}
+
+Estimate BBoxImmEkf::predict(const Camera& cam_query, const Vec3& own_vel,
+                             double t_query, const Vec3& own_disp) const {
+  Estimate out;
+  if (!have_ || !filt_valid_) return out;
+
+  Vec<N> xs[kModels];
+  Mat<N, N> Ps[kModels];
+  for (int i = 0; i < kModels; ++i) pack(x_[i], P_[i], xs[i], Ps[i]);
+
+  Vec<N> x;
+  Mat<N, N> P;
+  mix_combined(weight_, valid_, xs, Ps, x, P);
+  if (!finite_state(x)) return out;
+
+  double dt = t_query - t_;
+  dt = std::min(std::max(dt, 0.0), 3.0);
+  predict_linear(x, P, dt, own_vel, cfg_,
+                 static_cast<double>(cfg_.sigma_accel), &own_disp);
   if (!finite_state(x)) return out;
   out = pack_estimate(x, P, cam_query, cfg_, last_range_bias_known_);
   for (int i = 0; i < kModels; ++i) out.model_prob[i] = model_prob_[i];

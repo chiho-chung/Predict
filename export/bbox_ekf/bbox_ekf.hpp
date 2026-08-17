@@ -175,9 +175,14 @@ class BBoxEkf {
   // (pixel size of the predicted box). LOS comes from p_rel, not attitude.
   //   delay removed:  t_query = t_now
   //   future LOS:     t_query = t_now + horizon
-  // own_vel is the velocity at t_query (the camera keeps moving).
+  // own_vel is the camera velocity used when you do not pass own_disp
+  // (constant-velocity own motion: camera moves own_vel * dt).
+  // own_disp is the camera displacement over [last_stamp, t_query] from your
+  // IMU / planned path. Prefer this for +H while you are accelerating.
   Estimate predict(const Camera& cam_query, const Vec3& own_vel,
                    double t_query) const;
+  Estimate predict(const Camera& cam_query, const Vec3& own_vel, double t_query,
+                   const Vec3& own_disp) const;
 
  private:
   Config cfg_{};

@@ -115,8 +115,11 @@ class Tracker {
 
   // Estimate at t_now + lead_s, reprojected through cam_query. own_vel is
   // needed because the state is relative to a camera that keeps moving.
+  // own_disp, when set, is camera displacement over [last stamp, t_query]
+  // (IMU past + planned path). Use it for +H while the chaser accelerates.
   TrackEstimate at(const CameraFrame& cam_query, const Vec3& own_vel,
-                   float t_now, float lead_s) const;
+                   float t_now, float lead_s,
+                   const Vec3* own_disp = nullptr) const;
 
   Vec2 velocity_px() const { return px_.velocity_px(); }
   const float* model_probs() const { return model_prob_; }

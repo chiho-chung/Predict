@@ -59,7 +59,10 @@ const bbox_ekf::Camera cam_now = bbox_ekf::Camera::from_fov(640, 480, 70.0f, zoo
 const bbox_ekf::Vec3 vel_now = {vn, ve, vd};
 
 auto now  = ekf.predict(cam_now, vel_now, t_now);        // delay removed
-auto fut  = ekf.predict(cam_now, vel_now, t_now + 0.5);  // +H future LOS
+auto fut  = ekf.predict(cam_now, vel_now, t_now + 0.5);  // +H, CV own motion
+// Prefer this while you are accelerating: camera Δp over [last_stamp, t_query]
+// from IMU (past) + your planned path (future).
+auto fut2 = ekf.predict(cam_now, vel_now, t_now + 0.5, cam_delta);
 
 if (now.valid) {
   // now.heading_deg, now.attack_deg  — bias removed (from p_rel)
@@ -68,7 +71,7 @@ if (now.valid) {
 }
 ```
 
-`push` uses `m.t` to get `dt` (irregular cameras are fine). `predict(..., t_now)` coasts from the last stamp to now, which **removes pipeline delay**. `t_now + H` is the future LOS.
+`push` uses `m.t` to get `dt` (irregular cameras are fine). `predict(..., t_now)` coasts from the last stamp to now, which **removes pipeline delay**. `t_now + H` is the future LOS. The 3-argument `predict` treats own motion as constant velocity. If you know camera displacement over `[last_stamp, t_query]`, pass it as `own_disp` so your own accel is not eaten as target motion. A +H coast that would pass through the camera is rebuilt with cross-range velocity only.
 
 `predict` uses `cam_query` only for `fx` / zoom (predicted box size in pixels). `now.box` is that size, placed at the image centre — there is no attitude to project a pixel centre.
 

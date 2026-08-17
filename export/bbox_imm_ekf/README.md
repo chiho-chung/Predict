@@ -33,6 +33,7 @@ imm.push(m);
 
 auto now = imm.predict(cam_now, vel_now, t_now);        // delay removed
 auto fut = imm.predict(cam_now, vel_now, t_now + 0.5);  // +H
+auto fut2 = imm.predict(cam_now, vel_now, t_now + 0.5, cam_delta);  // + IMU / plan
 
 // now.heading_deg, now.range_m, now.box
 // now.model_prob[0..2]  — quiet / moderate / hard

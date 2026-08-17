@@ -211,8 +211,8 @@ void PlotWindow::push(const SimSnapshot& snap, const SimConfig& cfg) {
                          static_cast<size_t>(j);
         err_heading_[i] = wrap180(pred_raw_heading_[static_cast<size_t>(j)] -
                                   origin.heading_deg);
-        err_attack_[i] =
-            pred_raw_attack_[static_cast<size_t>(j)] - origin.attack_deg;
+        err_attack_[i] = wrap180(
+            pred_raw_attack_[static_cast<size_t>(j)] - origin.attack_deg);
         err_valid_[i] = 1;
       }
     }

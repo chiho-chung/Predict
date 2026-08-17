@@ -21,6 +21,12 @@ float rand_uniform(uint32_t& state) {
 
 float rand_signed(uint32_t& state) { return rand_uniform(state) * 2.0f - 1.0f; }
 
+float wrap180(float d) {
+  while (d > 180.0f) d -= 360.0f;
+  while (d < -180.0f) d += 360.0f;
+  return d;
+}
+
 }  // namespace
 
 Simulation::Simulation(SimConfig cfg) : cfg_(std::move(cfg)) { reset(); }
@@ -64,6 +70,10 @@ void Simulation::reset() {
 
   jit_du_ = jit_dv_ = 0;
   jit_dw_ = jit_dh_ = 0;
+  los_hist_i_ = 0;
+  los_hist_n_ = 0;
+  have_filter_cam_pos_ = false;
+  filter_cam_pos_ = {};
   step(0.0f);
 }
 
@@ -145,40 +155,69 @@ Vec3 Simulation::camera_position() const {
   return drone_.pos + Vec3{0, 0, -0.04f};
 }
 
-void Simulation::update_chase(float dt) {
-  if (!cfg_.chase_enabled || dt <= 0) return;
-
-  const float lead = cfg_.predict.enabled ? cfg_.predict.horizon_s * 0.5f : 0.0f;
-  const Vec3 aim = target_.pos + target_.vel * lead;
-  const Vec3 standoff = (drone_.pos - aim).normalized() * 8.0f;
+void apply_chase(DroneState& drone, const Vec3& tgt_pos, const Vec3& tgt_vel,
+                 float intercept_lead_s, float dt) {
+  if (dt <= 0) return;
+  const Vec3 aim = tgt_pos + tgt_vel * intercept_lead_s;
+  Vec3 away = drone.pos - aim;
+  const float away_len = away.length();
+  if (away_len < 1e-4f) away = Vec3{0, -1, 0};
+  else away = away * (1.0f / away_len);
+  const Vec3 standoff = away * 8.0f;
   const Vec3 want_pos = aim + Vec3{standoff.x, standoff.y, 0} + Vec3{0, 0, 3.0f};
-  const Vec3 to_aim = want_pos - drone_.pos;
+  const Vec3 to_aim = want_pos - drone.pos;
   const Vec3 desired_dir = to_aim.normalized();
 
-  const float dist = (target_.pos - drone_.pos).length();
+  const float dist = (tgt_pos - drone.pos).length();
   float speed_scale = 1.0f;
   if (dist < 6.0f) speed_scale = dist / 6.0f;
   if (dist > 25.0f) speed_scale = 1.25f;
 
-  const Vec3 desired_vel = desired_dir * (drone_.max_speed * speed_scale);
-  Vec3 accel = (desired_vel - drone_.vel);
+  const Vec3 desired_vel = desired_dir * (drone.max_speed * speed_scale);
+  Vec3 accel = (desired_vel - drone.vel);
   const float a_len = accel.length();
-  if (a_len > drone_.accel) {
-    accel = accel * (drone_.accel / a_len);
+  if (a_len > drone.accel) {
+    accel = accel * (drone.accel / a_len);
   }
-  drone_.vel += accel * dt;
+  drone.vel += accel * dt;
 
-  const float spd = drone_.vel.length();
-  if (spd > drone_.max_speed) {
-    drone_.vel = drone_.vel * (drone_.max_speed / spd);
+  const float spd = drone.vel.length();
+  if (spd > drone.max_speed) {
+    drone.vel = drone.vel * (drone.max_speed / spd);
   }
 
-  drone_.pos += drone_.vel * dt;
-  drone_.pos.z = clampf(drone_.pos.z, 3.0f, 40.0f);
+  drone.pos += drone.vel * dt;
+  drone.pos.z = clampf(drone.pos.z, 3.0f, 40.0f);
 
-  if (drone_.vel.length() > 0.2f) {
-    drone_.yaw = std::atan2(drone_.vel.x, drone_.vel.y);
+  if (drone.vel.length() > 0.2f) {
+    drone.yaw = std::atan2(drone.vel.x, drone.vel.y);
   }
+}
+
+void Simulation::update_chase(float dt) {
+  if (!cfg_.chase_enabled || dt <= 0) return;
+
+  const float lead = cfg_.predict.enabled ? cfg_.predict.horizon_s * 0.5f : 0.0f;
+  apply_chase(drone_, target_.pos, target_.vel, lead, dt);
+}
+
+Vec3 Simulation::predicted_own_disp(float horizon_s,
+                                    const TrackEstimate& est) const {
+  if (horizon_s <= 1e-6f || !cfg_.chase_enabled) return {0, 0, 0};
+  if (!est.valid || est.pos_rel.length() < 0.05f) return drone_.vel * horizon_s;
+
+  DroneState d = drone_;
+  Vec3 tgt = camera_position() + est.pos_rel;
+  Vec3 tv = est.vel_world;
+  const float dt = cfg_.sim_dt();
+  const float lead = cfg_.predict.enabled ? cfg_.predict.horizon_s * 0.5f : 0.0f;
+  const int n = std::max(1, static_cast<int>(horizon_s / dt + 0.5f));
+  const Vec3 p0 = d.pos;
+  for (int i = 0; i < n; ++i) {
+    apply_chase(d, tgt, tv, lead, dt);
+    tgt += tv * dt;
+  }
+  return d.pos - p0;
 }
 
 void Simulation::update_target(float dt) {
@@ -383,6 +422,8 @@ void Simulation::deliver_detections() {
     meas_cam_ = p.meas.cam;
     meas_clean_box_ = p.clean_box;
     meas_clean_valid_ = p.clean_valid;
+    filter_cam_pos_ = p.meas.cam.pos;
+    have_filter_cam_pos_ = true;
     ++detect_count_;
   }
 
@@ -397,12 +438,15 @@ void Simulation::deliver_detections() {
 }
 
 void Simulation::update_los(const Detection& truth, const Detection& est,
-                            const Detection& pred) {
+                            const Detection& pred, const TrackEstimate& est_t,
+                            const TrackEstimate& pred_t) {
   snap_.los = LosSet{};
   const CameraFrame cam_now = current_camera();
 
-  // All five paths start from a box center so they differ only by delay,
-  // jitter and prediction rather than by how the angle is derived.
+  // Origin, delayed and jittered are boxes: they exist even before a filter
+  // has a 3D state. Filter "now" / +H use world p_rel, because a pixel
+  // round-trip through the *current* camera corrupts +H once the coasted
+  // relative vector leaves the FOV (zc clamp → ludicrous angles).
   if (truth.visible) {
     snap_.los.origin = los_from_box(cam_now, truth.box);
   }
@@ -412,12 +456,14 @@ void Simulation::update_los(const Detection& truth, const Detection& est,
   if (last_meas_.visible) {
     snap_.los.jittered = los_from_box(meas_cam_, last_meas_.box);
   }
-  // Predictor output describes the current image, so it uses the current pose.
-  // For the +H trace the future pose is unknown; the current one is used.
-  if (est.visible) {
+  if (est_t.valid && est_t.pos_rel.length() > 0.05f) {
+    snap_.los.estimate = los_from_rel(est_t.pos_rel);
+  } else if (est.visible) {
     snap_.los.estimate = los_from_box(cam_now, est.box);
   }
-  if (pred.visible) {
+  if (pred_t.valid && pred_t.pos_rel.length() > 0.05f) {
+    snap_.los.predicted = los_from_rel(pred_t.pos_rel);
+  } else if (pred.visible) {
     snap_.los.predicted = los_from_box(cam_now, pred.box);
   }
 }
@@ -455,7 +501,14 @@ void Simulation::step(float dt) {
   TrackEstimate pred_t{};
   if (tracker_.ready() && cfg_.predict.enabled) {
     est_t = tracker_.at(cam_now, drone_.vel, time_, 0.0f);
-    pred_t = tracker_.at(cam_now, drone_.vel, time_, cfg_.predict.horizon_s);
+    if (cfg_.predict.horizon_s > 1e-6f && have_filter_cam_pos_) {
+      Vec3 total = (camera_position() - filter_cam_pos_) +
+                   predicted_own_disp(cfg_.predict.horizon_s, est_t);
+      pred_t = tracker_.at(cam_now, drone_.vel, time_, cfg_.predict.horizon_s,
+                           &total);
+    } else if (cfg_.predict.horizon_s > 1e-6f) {
+      pred_t = tracker_.at(cam_now, drone_.vel, time_, cfg_.predict.horizon_s);
+    }
   }
 
   Detection est{};
@@ -469,11 +522,9 @@ void Simulation::step(float dt) {
   if (pred_t.valid) {
     pred.box = pred_t.box;
     pred.visible = true;
-  } else if (last_meas_.visible) {
-    pred = last_meas_;
   }
 
-  update_los(truth, est, pred);
+  update_los(truth, est, pred, est_t, pred_t);
 
   snap_.drone = drone_;
   snap_.target = target_;
@@ -490,6 +541,26 @@ void Simulation::step(float dt) {
 
   snap_.track_now = est_t;
   snap_.track_pred = pred_t;
+
+  snap_.pred_err_valid = false;
+  snap_.pred_err_hdg = 0;
+  snap_.pred_err_att = 0;
+  origin_hist_[los_hist_i_] = snap_.los.origin;
+  pred_hist_[los_hist_i_] = snap_.los.predicted;
+  const int lead = static_cast<int>(cfg_.predict.horizon_s / cfg_.sim_dt() + 0.5f);
+  if (lead > 0 && los_hist_n_ > lead) {
+    const int j = (los_hist_i_ - lead + kLosHist) % kLosHist;
+    if (pred_hist_[j].valid && snap_.los.origin.valid) {
+      snap_.pred_err_hdg =
+          wrap180(pred_hist_[j].heading_deg - snap_.los.origin.heading_deg);
+      snap_.pred_err_att =
+          wrap180(pred_hist_[j].attack_deg - snap_.los.origin.attack_deg);
+      snap_.pred_err_valid = true;
+    }
+  }
+  los_hist_i_ = (los_hist_i_ + 1) % kLosHist;
+  if (los_hist_n_ < kLosHist) ++los_hist_n_;
+
   snap_.true_range_m = (target_.pos - camera_position()).length();
   snap_.range_err_m =
       est_t.valid ? std::fabs(est_t.range_m - snap_.true_range_m) : 0.0f;

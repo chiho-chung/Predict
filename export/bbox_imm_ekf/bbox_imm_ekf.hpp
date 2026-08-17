@@ -136,6 +136,8 @@ class BBoxImmEkf {
 
   Estimate predict(const Camera& cam_query, const Vec3& own_vel,
                    double t_query) const;
+  Estimate predict(const Camera& cam_query, const Vec3& own_vel, double t_query,
+                   const Vec3& own_disp) const;
 
  private:
   Config cfg_{};

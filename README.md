@@ -25,6 +25,7 @@ Headless A/B of the older estimator set (no window), useful when tuning:
 
 ```bat
 tools\check.bat
+tools\pred_check.bat
 ```
 
 ## Experiment CSVs
@@ -58,14 +59,6 @@ Auto mode forces the **ideal gimbal** so the box does not depend on which filter
 is steering. Combined with a fixed spawn seed, every estimator on a scenario
 sees identical measurements. LOS-only filters use the same centre / own-velocity
 / camera pose and ignore width and height.
-
-Need `#include <cmath>` in csv_log for NAN - already there.
-
-localtime_s on MinGW: I'll use a safer fallback in case compile fails.
-
-Also add logs/ to a simple note - user might want gitignore. No git repo.
-
-Build.
 
 ## Loop rates
 
@@ -142,9 +135,10 @@ The error panels keep zero in view, mark it with a brighter line, and print the
 paths can be ranked at a glance instead of eyeballed.
 
 `F1`–`F5` hide a trace *and its error trace together*, which also drops it from
-the autoscale. That matters here: the `+H` error is several times larger than the
-rest, so with `F5` on the error panels span ±35° and with `F5` off they span ±3°
-and the remaining traces become readable.
+the autoscale. Delay-removed is ~0.4°; `+H` on a chasing airframe is a few
+degrees (smooth) or ~10° RMS when the target jinks, because 0.5 s of
+constant-velocity cannot follow a 7 m/s² turn. Filtered `+H` LOS is world
+`p_rel`, not a pixel box run through the current gimbal.
 
 The three "now" paths (delayed, jittered+delayed, delay-removed) are scored
 against the origin of the same sample. The `+H` path is not: it claims to
@@ -161,6 +155,8 @@ At the default 50 ms delay, typical RMS over the window (`F5` off):
 | delayed | 0.92° | 1.83° |
 | jittered+delayed | 0.93° | 1.83° |
 | delay removed | **0.51°** | **0.39°** |
+| predicted +H (Export-EKF, chase on, smooth) | 3.1° (peak 8°) | 5.6° (peak 11°) |
+| predicted +H (same, chase off) | 0.39° (peak 0.9°) | 0.68° (peak 1.6°) |
 
 The delayed figure is geometry, not a defect: LOS heading slews fast enough that
 tens of ms of staleness is degrees of error. Jitter adds almost nothing on top of
@@ -436,6 +432,8 @@ is flat from 8 to 12:
 | estPx, jinking | 11.90 | 8.05 | 6.71 | 5.64 | 5.10 | **4.92** | 4.91 |
 
 Reproduce any of the tables with `tools\check.bat` (headless, no window needed).
+`+H` LOS vs origin at `t+H` is `tools\pred_check.bat` (fails if heading peaks
+again look like a through-origin flip).
 `tools\grab.ps1 -Which plot -Out build\shot.png` screenshots a running window.
 
 ### Known limits
@@ -444,8 +442,12 @@ Reproduce any of the tables with `tools\check.bat` (headless, no window needed).
   the current box; the EKF models that as a Gauss-Markov fraction so the leftover
   innovation is white. The UKF still treats `R` as white, which is slightly
   wrong on purpose.
-- The `+H` box is reprojected through the *current* camera pose because the
-  future pose is unknown.
+- `+H` heading/attack come from world `p_rel` (not a future box through the
+  current gimbal). Pass camera displacement over `[stamp, t+H]` into
+  `predict(..., own_disp)` so own acceleration is not treated as target motion.
+  A 0.5 s coast that would punch through the camera is rebuilt with cross-range
+  velocity only. Chase-on residual is mostly target maneuver plus chase-on-truth
+  vs the filter's own-plan; chase-off +H on Export-EKF is ~0.7°.
 - The chase controller still steers on truth; only the gimbal and the estimator
   run closed-loop on measurements.
 - Range degrades gracefully rather than silently: at 40 m a 30 cm target is ~3 px

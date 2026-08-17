@@ -94,7 +94,7 @@ struct Scenario {
 
 struct RunScore {
   EstimatorType type = EstimatorType::ExportEkf;
-  Acc est_px, held_px, los_h, los_a, range, size, speed;
+  Acc est_px, held_px, los_h, los_a, range, size, speed, pred_h, pred_a;
   int rejects = 0;
   int updates = 0;
   int steps = 0;
@@ -291,6 +291,10 @@ RunScore run_one(const Scenario& sc, EstimatorType type, int steps, float dt,
       out.los_a.add(wrap180(snap.los.estimate.attack_deg -
                             snap.los.origin.attack_deg));
     }
+    if (snap.pred_err_valid) {
+      out.pred_h.add(snap.pred_err_hdg);
+      out.pred_a.add(snap.pred_err_att);
+    }
     if (estimator_uses_filter(type) && snap.track_now.valid &&
         snap.track_now.range_m > 0.1f && snap.true_range_m > 0.1f) {
       out.range.add(snap.range_err_m);
@@ -412,8 +416,8 @@ int run_auto_bench(float seconds, bool quick) {
       if (tape) std::fclose(tape);
       first = false;
 
-      std::printf("  est=%.2fpx  hdg=%.3fdeg  att=%.3fdeg  rng=%.2fm\n",
-                  sc_run.est_px.rms(), sc_run.los_h.rms(), sc_run.los_a.rms(),
+      std::printf("  est=%.2fpx  hdg=%.3fdeg  +H=%.3fdeg  rng=%.2fm\n",
+                  sc_run.est_px.rms(), sc_run.los_h.rms(), sc_run.pred_h.rms(),
                   sc_run.range.rms());
 
       if (type == EstimatorType::ExportEkf ||
