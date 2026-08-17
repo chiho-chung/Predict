@@ -276,7 +276,7 @@ Sensors, matching what the airframe can actually supply:
 
 - own velocity in the nav frame (never own position)
 - camera direction on the drone (body attitude + gimbal angles)
-- the detector's bounding box: centre and size in pixels, jittered and late
+- the detector's bounding box: centre (pixels) and size (±10% of box), jittered and late
 
 From those, range, target velocity and target extent are *inferred*.
 
