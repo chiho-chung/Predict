@@ -1,7 +1,8 @@
 #pragma once
 
-#include "sim/drone_model.hpp"
+#include "bbox_ekf.hpp"
 #include "math/linalg.hpp"
+#include "sim/drone_model.hpp"
 #include "sim/types.hpp"
 
 // Image-plane bounding box predictor.
@@ -45,6 +46,7 @@ bool estimator_uses_filter(EstimatorType t);
 bool estimator_uses_bbox(EstimatorType t);
 bool estimator_is_imm(EstimatorType t);
 bool estimator_is_unscented(EstimatorType t);
+bool estimator_is_export(EstimatorType t);
 
 // A detection, tagged with everything needed to interpret it: the camera pose it
 // was captured with, own velocity, and the frame TIMESTAMP. Predictors never
@@ -91,7 +93,8 @@ class TargetFilter {
   bool valid = false;
 };
 
-// Facade over the baseline predictor, bbox EKF/UKF/IMM, and LOS-only twins.
+// Facade over the baseline, export BBoxEkf (default), origin EKF/UKF/IMM,
+// and LOS-only twins.
 class Tracker {
  public:
   static constexpr int kMaxModels = 3;
@@ -122,6 +125,7 @@ class Tracker {
 
   TrackerConfig cfg_{};
   BBoxPredictor px_;  // always fed, so the baseline stays available
+  bbox_ekf::BBoxEkf export_;  // EstimatorType::ExportEkf
 
   TargetFilter models_[kMaxModels];
   double weight_[kMaxModels]{};

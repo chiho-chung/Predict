@@ -69,15 +69,17 @@ void run(const char* tag, EstimatorType type, bool zoom_cycle) {
     if (s.zoom < zoom_lo) zoom_lo = s.zoom;
     if (s.zoom > zoom_hi) zoom_hi = s.zoom;
   }
-  std::printf("%-10s  %-8s  zoom %.2f-%.2f  px=%.2f  hdg=%.3f  att=%.3f  rng=%.2f\n",
-              tag, type == EstimatorType::Ekf ? "EKF" : "IMM-EKF", zoom_lo,
-              zoom_hi, px.rms(), hdg.rms(), att.rms(), rng.rms());
+  std::printf("%-10s  %-11s  zoom %.2f-%.2f  px=%.2f  hdg=%.3f  att=%.3f  rng=%.2f\n",
+              tag, estimator_name(type), zoom_lo, zoom_hi, px.rms(), hdg.rms(),
+              att.rms(), rng.rms());
 }
 
 }  // namespace
 
 int main() {
   std::printf("zoom check  20s  10Hz  timing on  ideal gimbal\n");
+  run("fixed 1x", EstimatorType::ExportEkf, false);
+  run("cycle 1-3x", EstimatorType::ExportEkf, true);
   run("fixed 1x", EstimatorType::Ekf, false);
   run("cycle 1-3x", EstimatorType::Ekf, true);
   run("fixed 1x", EstimatorType::ImmEkf, false);

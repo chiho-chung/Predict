@@ -63,6 +63,7 @@ BBox BBoxPredictor::at(float t_now, float lead_s) const {
 const char* estimator_name(EstimatorType t) {
   switch (t) {
     case EstimatorType::CvPixel: return "CV-pixel";
+    case EstimatorType::ExportEkf: return "Export-EKF";
     case EstimatorType::Ekf: return "EKF";
     case EstimatorType::Ukf: return "UKF";
     case EstimatorType::ImmEkf: return "IMM-EKF";
@@ -80,8 +81,9 @@ bool estimator_uses_filter(EstimatorType t) {
 }
 
 bool estimator_uses_bbox(EstimatorType t) {
-  return t == EstimatorType::Ekf || t == EstimatorType::Ukf ||
-         t == EstimatorType::ImmEkf || t == EstimatorType::ImmUkf;
+  return t == EstimatorType::ExportEkf || t == EstimatorType::Ekf ||
+         t == EstimatorType::Ukf || t == EstimatorType::ImmEkf ||
+         t == EstimatorType::ImmUkf;
 }
 
 bool estimator_is_imm(EstimatorType t) {
@@ -92,6 +94,10 @@ bool estimator_is_imm(EstimatorType t) {
 bool estimator_is_unscented(EstimatorType t) {
   return t == EstimatorType::Ukf || t == EstimatorType::ImmUkf ||
          t == EstimatorType::UkfLos || t == EstimatorType::ImmUkfLos;
+}
+
+bool estimator_is_export(EstimatorType t) {
+  return t == EstimatorType::ExportEkf;
 }
 
 namespace {
@@ -136,6 +142,73 @@ double vec_comp(const Vec3& v, int i) {
 }
 
 bool use_meas_bias(const TrackerConfig& cfg) { return cfg.meas_corr >= 0.05f; }
+
+bbox_ekf::Config export_cfg_of(const TrackerConfig& cfg) {
+  bbox_ekf::Config out;
+  out.sigma_px_center = cfg.sigma_px_center;
+  out.sigma_px_size = cfg.sigma_px_size;
+  out.sigma_own_vel = cfg.sigma_own_vel;
+  out.size_prior_m = cfg.size_prior_m;
+  out.size_prior_sigma_m = cfg.size_prior_sigma_m;
+  out.size_walk = cfg.size_walk;
+  out.gate_chi2 = cfg.gate_chi2;
+  out.sigma_accel = cfg.sigma_accel;
+  out.meas_corr = cfg.meas_corr;
+  out.meas_corr_tau_s = cfg.meas_corr_tau_s;
+  out.meas_bias_sigma_px = cfg.meas_bias_sigma_px;
+  return out;
+}
+
+bbox_ekf::Meas export_meas_of(const TrackerMeas& m) {
+  const LosAngles los = los_from_box(m.cam, m.box);
+  bbox_ekf::Meas out;
+  out.heading_deg = los.heading_deg;
+  out.attack_deg = los.attack_deg;
+  out.width_px = m.box.width();
+  out.height_px = m.box.height();
+  out.cam = bbox_ekf::Camera::from_fx(m.cam.width, m.cam.height, m.cam.fx,
+                                      m.cam.fy);
+  out.own_vel = {m.own_vel.x, m.own_vel.y, m.own_vel.z};
+  out.t = m.t;
+  return out;
+}
+
+bbox_ekf::Camera export_cam_of(const CameraFrame& cam) {
+  return bbox_ekf::Camera::from_fx(cam.width, cam.height, cam.fx, cam.fy);
+}
+
+TrackEstimate track_from_export(const bbox_ekf::Estimate& e,
+                                const CameraFrame& cam_query) {
+  TrackEstimate out;
+  if (!e.valid) return out;
+  out.valid = true;
+  out.pos_rel = Vec3{e.pos_rel.x, e.pos_rel.y, e.pos_rel.z};
+  out.vel_world = Vec3{e.vel_world.x, e.vel_world.y, e.vel_world.z};
+  out.range_m = e.range_m;
+  out.range_sigma_m = e.range_sigma_m;
+  out.size_w_m = e.size_w_m;
+  out.size_h_m = e.size_h_m;
+  out.speed_mps = e.speed_mps;
+  out.model_count = 1;
+  out.model_prob[0] = 1.0f;
+
+  // Filter did not use gimbal attitude; the HUD still needs a pixel box.
+  const ProjModel pm = proj_of(cam_query);
+  double zc = axis_dot(pm.fwd, out.pos_rel.x, out.pos_rel.y, out.pos_rel.z);
+  if (zc < kMinDepth) zc = kMinDepth;
+  const double xc =
+      axis_dot(pm.right, out.pos_rel.x, out.pos_rel.y, out.pos_rel.z);
+  const double yc = axis_dot(pm.up, out.pos_rel.x, out.pos_rel.y, out.pos_rel.z);
+  const double u = pm.cu + pm.fx * xc / zc;
+  const double v = pm.cv - pm.fy * yc / zc;
+  const double w = std::max(2.0, static_cast<double>(e.box.width()));
+  const double h = std::max(2.0, static_cast<double>(e.box.height()));
+  out.box.u0 = static_cast<float>(u - 0.5 * w);
+  out.box.u1 = static_cast<float>(u + 0.5 * w);
+  out.box.v0 = static_cast<float>(v - 0.5 * h);
+  out.box.v1 = static_cast<float>(v + 0.5 * h);
+  return out;
+}
 
 // z = [u, v, width_px, height_px]. Bias is detector error, so it is added only
 // when comparing to a measurement, never when reprojecting a world estimate.
@@ -502,6 +575,8 @@ double TargetFilter::update(const TrackerMeas& m, const TrackerConfig& cfg,
 
 void Tracker::reset() {
   px_.reset();
+  export_.set_config(export_cfg_of(cfg_));
+  export_.reset();
   for (int i = 0; i < kMaxModels; ++i) {
     models_[i] = TargetFilter{};
     weight_[i] = 0.0;
@@ -521,9 +596,12 @@ void Tracker::set_config(const TrackerConfig& cfg) {
                        (estimator_uses_filter(cfg.type) !=
                         estimator_uses_filter(cfg_.type)) ||
                        (estimator_uses_bbox(cfg.type) !=
-                        estimator_uses_bbox(cfg_.type));
+                        estimator_uses_bbox(cfg_.type)) ||
+                       (estimator_is_export(cfg.type) !=
+                        estimator_is_export(cfg_.type));
   cfg_ = cfg;
   px_.set_smoothing(cfg_.vel_smooth);
+  export_.set_config(export_cfg_of(cfg_));
   if (restart) {
     reset();
   } else {
@@ -534,6 +612,7 @@ void Tracker::set_config(const TrackerConfig& cfg) {
 bool Tracker::ready() const {
   if (!have_track_) return false;
   if (!estimator_uses_filter(cfg_.type)) return px_.ready();
+  if (estimator_is_export(cfg_.type)) return export_.ready();
   for (int i = 0; i < n_models_; ++i) {
     if (models_[i].valid) return true;
   }
@@ -554,6 +633,15 @@ void Tracker::push(const TrackerMeas& m) {
     have_track_ = true;
     t_filter_ = m.t;
     ++updates_;
+    return;
+  }
+
+  if (estimator_is_export(cfg_.type)) {
+    export_.push(export_meas_of(m));
+    have_track_ = export_.ready();
+    t_filter_ = static_cast<float>(export_.last_stamp());
+    updates_ = export_.update_count();
+    rejects_ = export_.reject_count();
     return;
   }
 
@@ -701,6 +789,13 @@ TrackEstimate Tracker::at(const CameraFrame& cam_query, const Vec3& own_vel,
     out.box = px_.at(t_now, lead_s);
     out.valid = true;
     return out;
+  }
+
+  if (estimator_is_export(cfg_.type)) {
+    const bbox_ekf::Vec3 vel{own_vel.x, own_vel.y, own_vel.z};
+    const bbox_ekf::Estimate e =
+        export_.predict(export_cam_of(cam_query), vel, t_now + lead_s);
+    return track_from_export(e, cam_query);
   }
 
   Vec<N> x;

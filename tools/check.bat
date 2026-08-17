@@ -11,8 +11,9 @@ set "PATH=%MSYS%;%PATH%"
 
 if not exist build mkdir build
 
-g++ -std=c++17 -O2 -Wall -Wextra -Isrc ^
+g++ -std=c++17 -O2 -Wall -Wextra -Isrc -Iexport/bbox_ekf ^
   tools\rate_check.cpp src\sim\sim.cpp src\estimator\predictor.cpp src\io\csv_log.cpp ^
+  export\bbox_ekf\bbox_ekf.cpp ^
   -o build\rate_check.exe -static
 if errorlevel 1 exit /b 1
 

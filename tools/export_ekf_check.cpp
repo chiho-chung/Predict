@@ -246,6 +246,34 @@ void run_los_bias(const char* tag, float inj_h, float inj_a, bool pass_known,
 
 }  // namespace
 
+void run_wired_vs_standalone() {
+  SimConfig cfg = base();
+  cfg.tracker.type = EstimatorType::ExportEkf;
+  Simulation sim(cfg);
+  bbox_ekf::BBoxEkf ekf;
+
+  Acc delta, sim_r, std_r;
+  for (int i = 0; i < 2000; ++i) {
+    sim.step(0.01f);
+    if (sim.meas_delivered_this_step()) ekf.push(to_export(sim.last_push()));
+    const auto& s = sim.snapshot();
+    if (s.time < 2.0f || !s.los.origin.valid) continue;
+    const bbox_ekf::Camera cam_q = bbox_ekf::Camera::from_fx(
+        cfg.camera.width, cfg.camera.height, s.fx, s.fx);
+    const auto now =
+        ekf.predict(cam_q, {s.drone.vel.x, s.drone.vel.y, s.drone.vel.z},
+                    s.time);
+    if (now.valid) std_r.add(now.range_m - s.true_range_m);
+    if (s.track_now.valid && s.track_now.range_m > 0.1f) {
+      sim_r.add(s.track_now.range_m - s.true_range_m);
+      if (now.valid) delta.add(now.range_m - s.track_now.range_m);
+    }
+  }
+  std::printf(
+      "wired vs standalone  sim_rng=%.2f  std_rng=%.2f  |d|_rms=%.4f m\n\n",
+      sim_r.rms(), std_r.rms(), delta.rms());
+}
+
 int main() {
   bbox_ekf::Config off;
   off.range_bias_sigma_m = 0.0f;
@@ -254,6 +282,8 @@ int main() {
   on.range_bias_walk_m = 0.0f;
 
   std::printf("export BBoxEkf  distance-focused  20s  10Hz  timing on\n\n");
+  std::printf("--- sim Export-EKF vs standalone (same tape) ---\n");
+  run_wired_vs_standalone();
   std::printf("--- range estimate OFF (default) vs ON (sigma=1, walk=0) ---\n");
   run("smooth/off", TargetManeuver::Smooth, false, 2000, off);
   run("smooth/on", TargetManeuver::Smooth, false, 2000, on);

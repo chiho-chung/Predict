@@ -93,7 +93,7 @@ struct Scenario {
 };
 
 struct RunScore {
-  EstimatorType type = EstimatorType::Ekf;
+  EstimatorType type = EstimatorType::ExportEkf;
   Acc est_px, held_px, los_h, los_a, range, size, speed;
   int rejects = 0;
   int updates = 0;
@@ -102,9 +102,10 @@ struct RunScore {
 };
 
 const EstimatorType kAllEst[] = {
-    EstimatorType::CvPixel,   EstimatorType::Ekf,        EstimatorType::Ukf,
-    EstimatorType::ImmEkf,    EstimatorType::ImmUkf,     EstimatorType::EkfLos,
-    EstimatorType::UkfLos,    EstimatorType::ImmEkfLos,  EstimatorType::ImmUkfLos,
+    EstimatorType::CvPixel,   EstimatorType::ExportEkf,  EstimatorType::Ekf,
+    EstimatorType::Ukf,       EstimatorType::ImmEkf,     EstimatorType::ImmUkf,
+    EstimatorType::EkfLos,    EstimatorType::UkfLos,     EstimatorType::ImmEkfLos,
+    EstimatorType::ImmUkfLos,
 };
 
 const char* meas_tag(EstimatorType t) {
@@ -114,6 +115,8 @@ const char* meas_tag(EstimatorType t) {
 
 const char* family_name(EstimatorType t) {
   switch (t) {
+    case EstimatorType::ExportEkf:
+      return "Export-EKF";
     case EstimatorType::Ekf:
     case EstimatorType::EkfLos:
       return "EKF";
@@ -411,7 +414,8 @@ int run_auto_bench(float seconds, bool quick) {
                   sc_run.est_px.rms(), sc_run.los_h.rms(), sc_run.los_a.rms(),
                   sc_run.range.rms());
 
-      if (type == EstimatorType::Ekf || type == EstimatorType::ImmEkf) {
+      if (type == EstimatorType::ExportEkf || type == EstimatorType::Ekf ||
+          type == EstimatorType::ImmEkf) {
         std::fprintf(chosen_f, "%s,%s,%s,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%d\n",
                      sc.id, sc.name, estimator_name(type), sc_run.est_px.rms(),
                      sc_run.los_h.rms(), sc_run.los_a.rms(), sc_run.range.rms(),

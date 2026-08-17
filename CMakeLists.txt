@@ -13,9 +13,10 @@ add_executable(drone_chase_sim
   src/io/csv_log.cpp
   src/app/bench.cpp
   src/ui/history.cpp
+  export/bbox_ekf/bbox_ekf.cpp
 )
 
-target_include_directories(drone_chase_sim PRIVATE src)
+target_include_directories(drone_chase_sim PRIVATE src export/bbox_ekf)
 
 if(WIN32)
   target_link_libraries(drone_chase_sim PRIVATE gdi32 user32)

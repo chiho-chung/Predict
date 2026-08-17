@@ -150,9 +150,10 @@ struct TimingConfig {
 
 enum class EstimatorType {
   CvPixel = 0,  // image-space constant velocity (baseline)
-  Ekf,          // bbox: centre + size
+  ExportEkf,    // export BBoxEkf: world LOS + box size (default)
+  Ekf,          // origin pose-based EKF (comparison)
   Ukf,
-  ImmEkf,
+  ImmEkf,       // origin IMM-EKF (comparison)
   ImmUkf,
   EkfLos,       // same data, LOS / box-centre only — no width/height
   UkfLos,
@@ -162,7 +163,7 @@ enum class EstimatorType {
 };
 
 struct TrackerConfig {
-  EstimatorType type = EstimatorType::Ekf;
+  EstimatorType type = EstimatorType::ExportEkf;
 
   // Detector noise, 1-sigma. This describes what the detector does, which a
   // designer can characterise; it is not read from the simulator's truth.

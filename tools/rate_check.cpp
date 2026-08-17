@@ -168,15 +168,15 @@ void print_table(const char* title, float horizon_s, int steps,
                  TargetManeuver maneuver) {
   std::printf("\n=== %s target, horizon %.2f s, %.0f s run ===\n", title,
               horizon_s, steps / 100.0);
-  std::printf("%-9s %7s %7s %7s %7s %8s %8s %7s %7s %5s  %s\n", "estimator",
+  std::printf("%-11s %7s %7s %7s %7s %8s %8s %7s %7s %5s  %s\n", "estimator",
               "estPx", "heldPx", "losHdg", "losAtt", "rngRMS", "rngPeak",
               "rngBias", "sizeRMS", "rej", "model mix");
-  const EstimatorType types[] = {EstimatorType::CvPixel, EstimatorType::Ekf,
-                                 EstimatorType::Ukf, EstimatorType::ImmEkf,
-                                 EstimatorType::ImmUkf};
+  const EstimatorType types[] = {
+      EstimatorType::CvPixel, EstimatorType::ExportEkf, EstimatorType::Ekf,
+      EstimatorType::Ukf,     EstimatorType::ImmEkf,    EstimatorType::ImmUkf};
   for (EstimatorType t : types) {
     const Result r = run(t, horizon_s, steps, maneuver);
-    std::printf("%-9s %7.2f %7.2f %7.3f %7.3f", r.name, r.est_px, r.held_px,
+    std::printf("%-11s %7.2f %7.2f %7.3f %7.3f", r.name, r.est_px, r.held_px,
                 r.los_head, r.los_att);
     if (r.has_range) {
       std::printf(" %8.2f %8.2f %7.2f %7.3f %5d", r.range_rms, r.range_peak,

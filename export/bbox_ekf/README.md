@@ -30,7 +30,7 @@ LOS is already world heading/attack, so camera orientation is unused.
 ```cpp
 #include "bbox_ekf.hpp"
 
-bbox_ekf::BBoxEkf ekf;   // defaults match the sim
+bbox_ekf::BBoxEkf ekf;   // same model as sim default Export-EKF
 
 // --- slow path: each detector frame ---
 bbox_ekf::Meas m;

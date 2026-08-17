@@ -50,7 +50,7 @@ last summary row.
 | `scenarios.csv` | generated environments (motion, Hz, delay, bbox jitter, **frame timing**, spawn, seed) |
 | `summary.csv` | one row per scenario × estimator (RMS after 2 s warmup) |
 | `compare.csv` | bbox vs LOS-only paired on the **same** tape |
-| `chosen_ekf.csv` | EKF and IMM-EKF only (the real-world pair) |
+| `chosen_ekf.csv` | Export-EKF (default), origin EKF, and IMM-EKF |
 | `tapes/sXX_meas.csv` | shared detection tape, including per-frame timestamps |
 | `runs/sXX_<estimator>.csv` | 100 Hz timeseries for that replay |
 
@@ -78,8 +78,8 @@ The camera is **not** a metronome. Nominal 10 Hz, but the inter-frame period
 jitters (±20% by default), pipeline delay jitters (±10 ms), and the reported
 timestamp has clock noise (±2 ms). Each frame still carries a timestamp.
 
-Every predictor (EKF / IMM-EKF first, and the others for A/B) uses that stamp,
-not `1/Hz`:
+Every predictor (Export-EKF first, origin EKF / IMM-EKF for A/B, and the rest)
+uses that stamp, not `1/Hz`:
 
 - update: predict from the last stamp to this stamp, then incorporate the box
 - delay removed: coast from the last stamp to `t_now`
@@ -241,10 +241,11 @@ Include path is `-Isrc`. Headers are `"sim/sim.hpp"`, `"estimator/predictor.hpp"
 
 ## Estimator
 
-`src/estimator/predictor.hpp` / `src/estimator/predictor.cpp` holds nine selectable estimators. Cycle
-them at runtime with `E` / `W`. **EKF** is the main predictor for real-world
-use; **IMM-EKF** is the second candidate. The rest stay in the bench for A/B.
-All of them consume the per-frame timestamp.
+`src/estimator/predictor.hpp` / `src/estimator/predictor.cpp` holds ten selectable
+estimators. Cycle them at runtime with `E` / `W`. **Export-EKF** is the default
+(the drop-in `export/bbox_ekf` filter: world LOS + box size, no camera attitude).
+Origin **EKF** and **IMM-EKF** stay in the cycle for comparison. All of them
+consume the per-frame timestamp.
 
 To drop the bbox EKF into another project, copy `export/bbox_ekf/`
 (`bbox_ekf.hpp` + `bbox_ekf.cpp`). See that folder’s README for the API.
@@ -252,12 +253,13 @@ To drop the bbox EKF into another project, copy `export/bbox_ekf/`
 | Type | Measurement | What it is |
 |---|---|---|
 | `CV-pixel` | box centre + size (pixels) | image-space constant velocity (baseline) |
-| `EKF` | bbox | 12-state world-frame filter, analytic Jacobian |
-| `UKF` | bbox | same model, Julier unscented update (`kappa = 3`) |
-| `IMM-EKF` | bbox | 3 manoeuvre hypotheses, EKF updates |
+| `Export-EKF` | LOS + box size | **default.** export `BBoxEkf`, world heading/attack + fx |
+| `EKF` | bbox | origin 12-state pose-based filter (comparison) |
+| `UKF` | bbox | same origin model, Julier unscented update (`kappa = 3`) |
+| `IMM-EKF` | bbox | origin 3-hypothesis IMM, EKF updates (comparison) |
 | `IMM-UKF` | bbox | 3 manoeuvre hypotheses, UKF updates |
-| `EKF-LOS` | centre / LOS only | same EKF, **no** width or height |
-| `UKF-LOS` | centre / LOS only | same UKF, **no** width or height |
+| `EKF-LOS` | centre / LOS only | origin EKF, **no** width or height |
+| `UKF-LOS` | centre / LOS only | origin UKF, **no** width or height |
 | `IMM-EKF-LOS` | centre / LOS only | IMM-EKF without box size |
 | `IMM-UKF-LOS` | centre / LOS only | IMM-UKF without box size |
 
