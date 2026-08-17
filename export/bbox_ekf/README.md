@@ -97,9 +97,76 @@ ekf.set_config(cfg);
 
 If the target is not ~30 cm, set `size_prior_m` to the width that actually fills the box.
 
-**LOS bias.** If you already know a heading/attack offset, set `Meas::heading_bias_deg` / `attack_bias_deg` every frame — that is subtracted before the update and is the reliable path. `Estimate::heading_deg` / `attack_deg` are then bias-removed (they come from `p_rel`).
+## LOS bias modes
 
-Estimating an *unknown* residual (`los_bias_sigma_deg > 0`) is optional and off by default. A constant angle bias looks like a sideways position error when the only direction sensor is that same LOS, so it is only weakly observable. Enable it if you expect a slow leftover after calib; do not enable it on a clean LOS or range/LOS will get slightly worse.
+Two knobs:
+
+| Knob | Where | What it does |
+|---|---|---|
+| `los_bias_sigma_deg` | `Config` | `0` = do not estimate. `~2` = estimate a residual (deg 1-sigma). |
+| `heading_bias_deg`, `attack_bias_deg` | `Meas` each frame | Known/calib offset (deg). Subtracted before the update. Leave `0` if unknown. |
+
+`Estimate::heading_deg` / `attack_deg` always come from `p_rel` (bias removed). `Estimate::heading_bias_deg` / `attack_bias_deg` are the estimated residual. Call `ekf.reset()` if you change mode on a live filter.
+
+### 1. Raw (default)
+
+No calib, no estimation. Same as the sim EKF.
+
+```cpp
+bbox_ekf::Config cfg;
+cfg.los_bias_sigma_deg = 0.0f;     // already 0
+bbox_ekf::BBoxEkf ekf(cfg);
+
+m.heading_bias_deg = 0;
+m.attack_bias_deg  = 0;
+ekf.push(m);
+```
+
+### 2. Estimate
+
+Unknown offset; the filter tries to find it. Weak — a constant angle bias looks like a sideways position error when the only direction sensor is that same LOS. Use only if you expect leftover bias.
+
+```cpp
+bbox_ekf::Config cfg;
+cfg.los_bias_sigma_deg = 2.0f;     // initial 1-sigma, deg
+cfg.los_bias_walk_deg  = 0.02f;    // slow drift; 0 = freeze as constant
+bbox_ekf::BBoxEkf ekf(cfg);
+
+m.heading_bias_deg = 0;
+m.attack_bias_deg  = 0;
+ekf.push(m);
+// now.heading_bias_deg / now.attack_bias_deg  — what it estimated
+```
+
+### 3. Known calib (best if you have the offset)
+
+```cpp
+bbox_ekf::Config cfg;
+cfg.los_bias_sigma_deg = 0.0f;     // do not also estimate a residual
+bbox_ekf::BBoxEkf ekf(cfg);
+
+m.heading_deg = los_hdg;           // raw measured LOS
+m.attack_deg  = los_att;
+m.heading_bias_deg = calib_hdg;    // known offset, deg
+m.attack_bias_deg  = calib_att;
+ekf.push(m);
+```
+
+### 4. Known + estimate leftover
+
+Calib first, then a small residual on top.
+
+```cpp
+bbox_ekf::Config cfg;
+cfg.los_bias_sigma_deg = 2.0f;
+bbox_ekf::BBoxEkf ekf(cfg);
+
+m.heading_bias_deg = calib_hdg;
+m.attack_bias_deg  = calib_att;
+ekf.push(m);
+```
+
+`ekf.set_config(cfg)` after construct is the same as passing `Config` in. Do not enable estimate (mode 2) on a clean LOS — range/LOS get slightly worse.
 
 ## Build
 
