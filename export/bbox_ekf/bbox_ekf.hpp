@@ -18,12 +18,15 @@
 // What it infers:
 //   - relative target position, target velocity, range, target extent
 //   - delay-removed LOS at t_now, or future LOS at t_now + H
-//   - slow heading/attack bias (if enabled), removed from the reported LOS
+//   - slow heading/attack bias and range bias (if enabled), removed from
+//     the reported LOS / range
 //
-// State: [p_rel(3) | v_target(3) | width_m | height_m | los_bias(2) | size_bias(2)]
+// State: [p_rel(3) | v_target(3) | width_m | height_m | los_bias(2) |
+//         size_bias(2) | range_bias]
 // Dynamics are linear (own vel is a known input). Measurement is
-// [heading, attack, width_px, height_px]. Range comes from
-//   width_px = fx * width_m / range
+// [heading, attack, width_px, height_px]. Angular size uses
+//   width_px = fx * width_m / (range + range_bias)
+// so a first-catch box error can sit in range_bias instead of p_rel.
 
 namespace bbox_ekf {
 
@@ -94,6 +97,13 @@ struct Config {
   // from the reported LOS. Set sigma to 0 if you do not want it estimated.
   float los_bias_sigma_deg = 0.0f;  // initial 1-sigma; 0 = do not estimate
   float los_bias_walk_deg = 0.02f;  // deg/sqrt(s); 0 = constant bias
+  // Additive range bias (metres). Same pattern as LOS: estimate is off by
+  // default — size and range are coupled on a quiet track. A first-catch box
+  // error often looks like a constant offset:
+  //   width_px = fx * size / (range + bias)
+  // Set sigma to ~1 to estimate. Known offset: Meas::range_bias_m.
+  float range_bias_sigma_m = 0.0f;  // initial 1-sigma; 0 = do not estimate
+  float range_bias_walk_m = 0.0f;   // m/sqrt(s); 0 = freeze as constant
 };
 
 struct Meas {
@@ -105,6 +115,11 @@ struct Meas {
   // Config::los_bias_sigma_deg > 0.
   float heading_bias_deg = 0;
   float attack_bias_deg = 0;
+  // Known/calib range offset (metres). Angular size is interpreted as
+  //   width_px = fx * size / (range + range_bias_m [+ estimated])
+  // Leave 0 if unknown — the filter estimates a residual when
+  // Config::range_bias_sigma_m > 0.
+  float range_bias_m = 0;
   // Box size in pixels (angular size). Not corners.
   float width_px = 0;
   float height_px = 0;
@@ -128,11 +143,12 @@ struct Estimate {
   float attack_deg = 0;   // LOS elevation, bias removed
   float heading_bias_deg = 0;  // estimated residual heading bias
   float attack_bias_deg = 0;   // estimated residual attack bias
+  float range_bias_m = 0;      // estimated residual range bias (metres)
 };
 
 class BBoxEkf {
  public:
-  static constexpr int N = 12;
+  static constexpr int N = 13;
 
   explicit BBoxEkf(Config cfg = {});
 
@@ -167,6 +183,7 @@ class BBoxEkf {
   double t_ = 0;
   int updates_ = 0;
   int rejects_ = 0;
+  double last_range_bias_known_ = 0;
 };
 
 }  // namespace bbox_ekf

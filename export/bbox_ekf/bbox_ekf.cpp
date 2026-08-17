@@ -158,9 +158,13 @@ void los_from_p(double px, double py, double pz, double& hdg, double& att,
 
 bool use_size_bias(const Config& cfg) { return cfg.meas_corr >= 0.05f; }
 bool use_los_bias(const Config& cfg) { return cfg.los_bias_sigma_deg >= 0.01f; }
+bool use_range_bias(const Config& cfg) { return cfg.range_bias_sigma_m >= 0.01f; }
 bool use_angle_bias(const Config& cfg) {
   return use_los_bias(cfg) || use_size_bias(cfg);
 }
+
+constexpr int kRngB = 12;  // range-bias state; size-px bias is 10,11
+constexpr int kSizeBiasEnd = 12;
 
 bool finite_state(const Vec<N>& x) {
   for (int i = 0; i < N; ++i) {
@@ -169,17 +173,33 @@ bool finite_state(const Vec<N>& x) {
   return true;
 }
 
+double range_geom(const Vec<N>& x) {
+  double hdg = 0, att = 0, range = kMinDepth;
+  los_from_p(x(0, 0), x(1, 0), x(2, 0), hdg, att, range);
+  return range;
+}
+
+double range_eff(const Vec<N>& x, bool rng_b, double known_rb) {
+  double re = range_geom(x);
+  if (rng_b) re += x(kRngB, 0);
+  re += known_rb;
+  if (re < kMinDepth) re = kMinDepth;
+  return re;
+}
+
 // z = [heading_rad, attack_rad, width_px, height_px]
-Vec<M> h_of(const Vec<N>& x, const Intr& cam, bool los_bias, bool size_bias) {
+Vec<M> h_of(const Vec<N>& x, const Intr& cam, bool los_bias, bool size_bias,
+            bool rng_bias, double known_rb) {
   double hdg = 0, att = 0, range = kMinDepth;
   los_from_p(x(0, 0), x(1, 0), x(2, 0), hdg, att, range);
   const double sw = std::max(kMinSize, x(6, 0));
   const double sh = std::max(kMinSize, x(7, 0));
+  const double re = range_eff(x, rng_bias, known_rb);
   Vec<M> z;
   z(0, 0) = hdg;
   z(1, 0) = att;
-  z(2, 0) = cam.fx * sw / range;
-  z(3, 0) = cam.fy * sh / range;
+  z(2, 0) = cam.fx * sw / re;
+  z(3, 0) = cam.fy * sh / re;
   if (los_bias) {
     z(0, 0) += x(8, 0);
     z(1, 0) += x(9, 0);
@@ -191,7 +211,8 @@ Vec<M> h_of(const Vec<N>& x, const Intr& cam, bool los_bias, bool size_bias) {
   return z;
 }
 
-Mat<M, N> H_of(const Vec<N>& x, const Intr& cam, bool los_bias, bool size_bias) {
+Mat<M, N> H_of(const Vec<N>& x, const Intr& cam, bool los_bias, bool size_bias,
+               bool rng_bias, double known_rb) {
   const double px = x(0, 0), py = x(1, 0), pz = x(2, 0);
   double range = std::sqrt(px * px + py * py + pz * pz);
   if (range < kMinDepth) range = kMinDepth;
@@ -200,7 +221,9 @@ Mat<M, N> H_of(const Vec<N>& x, const Intr& cam, bool los_bias, bool size_bias) 
   const double horiz = std::sqrt(horiz2);
   const double sw = std::max(kMinSize, x(6, 0));
   const double sh = std::max(kMinSize, x(7, 0));
-  const double inv_r3 = 1.0 / (range * r2);
+  const double re = range_eff(x, rng_bias, known_rb);
+  const double inv_re2 = 1.0 / (re * re);
+  const double dr_dpi = 1.0 / range;
 
   Mat<M, N> H;
   H(0, 0) = py / horiz2;
@@ -208,14 +231,14 @@ Mat<M, N> H_of(const Vec<N>& x, const Intr& cam, bool los_bias, bool size_bias) 
   H(1, 0) = -pz * px / (r2 * horiz);
   H(1, 1) = -pz * py / (r2 * horiz);
   H(1, 2) = horiz / r2;
-  H(2, 0) = -cam.fx * sw * px * inv_r3;
-  H(2, 1) = -cam.fx * sw * py * inv_r3;
-  H(2, 2) = -cam.fx * sw * pz * inv_r3;
-  H(3, 0) = -cam.fy * sh * px * inv_r3;
-  H(3, 1) = -cam.fy * sh * py * inv_r3;
-  H(3, 2) = -cam.fy * sh * pz * inv_r3;
-  H(2, 6) = cam.fx / range;
-  H(3, 7) = cam.fy / range;
+  H(2, 0) = -cam.fx * sw * px * dr_dpi * inv_re2;
+  H(2, 1) = -cam.fx * sw * py * dr_dpi * inv_re2;
+  H(2, 2) = -cam.fx * sw * pz * dr_dpi * inv_re2;
+  H(3, 0) = -cam.fy * sh * px * dr_dpi * inv_re2;
+  H(3, 1) = -cam.fy * sh * py * dr_dpi * inv_re2;
+  H(3, 2) = -cam.fy * sh * pz * dr_dpi * inv_re2;
+  H(2, 6) = cam.fx / re;
+  H(3, 7) = cam.fy / re;
   if (los_bias) {
     H(0, 8) = 1.0;
     H(1, 9) = 1.0;
@@ -223,6 +246,10 @@ Mat<M, N> H_of(const Vec<N>& x, const Intr& cam, bool los_bias, bool size_bias) 
   if (size_bias) {
     H(2, 10) = 1.0;
     H(3, 11) = 1.0;
+  }
+  if (rng_bias) {
+    H(2, kRngB) = -cam.fx * sw * inv_re2;
+    H(3, kRngB) = -cam.fy * sh * inv_re2;
   }
   return H;
 }
@@ -283,15 +310,15 @@ void predict_linear(Vec<N>& x, Mat<N, N>& P, double dt, const Vec3& own_vel,
         std::max(0.2, static_cast<double>(cfg.meas_bias_sigma_px));
     const double sig_ang = sig_px / std::max(1.0, fx);
     const int i0 = use_los_bias(cfg) ? 10 : 8;
-    for (int i = i0; i < N; ++i) {
+    for (int i = i0; i < kSizeBiasEnd; ++i) {
       x(i, 0) *= rho;
       for (int j = 0; j < i0; ++j) {
         P(i, j) *= rho;
         P(j, i) *= rho;
       }
     }
-    for (int i = i0; i < N; ++i) {
-      for (int j = i0; j < N; ++j) P(i, j) *= rho * rho;
+    for (int i = i0; i < kSizeBiasEnd; ++i) {
+      for (int j = i0; j < kSizeBiasEnd; ++j) P(i, j) *= rho * rho;
     }
     if (!use_los_bias(cfg)) {
       P(8, 8) += (1.0 - rho * rho) * sig_ang * sig_ang;
@@ -299,6 +326,11 @@ void predict_linear(Vec<N>& x, Mat<N, N>& P, double dt, const Vec3& own_vel,
     }
     P(10, 10) += (1.0 - rho * rho) * sig_px * sig_px;
     P(11, 11) += (1.0 - rho * rho) * sig_px * sig_px;
+  }
+
+  if (use_range_bias(cfg)) {
+    const double walk = static_cast<double>(cfg.range_bias_walk_m);
+    P(kRngB, kRngB) += walk * walk * dt;
   }
 }
 
@@ -308,8 +340,9 @@ void init_state(const Meas& m, const Config& cfg, Vec<N>& x, Mat<N, N>& P) {
                            m.attack_deg - m.attack_bias_deg);
   const double w_px = std::max(2.0, static_cast<double>(m.width_px));
   const double h_px = std::max(2.0, static_cast<double>(m.height_px));
-  const double range =
-      std::min(std::max(cam.fx * cfg.size_prior_m / w_px, 1.0), 400.0);
+  const double range_box = cam.fx * cfg.size_prior_m / w_px;
+  const double range = std::min(
+      std::max(range_box - static_cast<double>(m.range_bias_m), 1.0), 400.0);
 
   x = Vec<N>{};
   x(0, 0) = dir.x * range;
@@ -324,7 +357,13 @@ void init_state(const Meas& m, const Config& cfg, Vec<N>& x, Mat<N, N>& P) {
   e1 = e1.normalized();
   const Vec3 e2 = dir.cross(e1).normalized();
   const double sig_perp = range * std::max(0.5f, cfg.sigma_px_center) / cam.fx;
-  const double sig_along = 0.5 * range;
+  double sig_along = 0.5 * range;
+  if (use_range_bias(cfg)) {
+    // First-catch box error is mostly along LOS. Leave that door open so the
+    // residual can move into range_bias instead of locking p_rel.
+    sig_along = std::max(sig_along, static_cast<double>(cfg.range_bias_sigma_m));
+    sig_along = std::max(sig_along, 0.7 * range);
+  }
   const double vp = sig_perp * sig_perp;
   const double va = sig_along * sig_along;
   for (int i = 0; i < 3; ++i) {
@@ -353,6 +392,10 @@ void init_state(const Meas& m, const Config& cfg, Vec<N>& x, Mat<N, N>& P) {
     P(10, 10) = sb * sb;
     P(11, 11) = sb * sb;
   }
+  if (use_range_bias(cfg)) {
+    const double sb = std::max(0.05, static_cast<double>(cfg.range_bias_sigma_m));
+    P(kRngB, kRngB) = sb * sb;
+  }
 }
 
 // 1 = accepted, 0 = gated, -1 = diverged
@@ -361,6 +404,8 @@ int ekf_update(Vec<N>& x, Mat<N, N>& P, const Meas& m, const Config& cfg) {
   const bool ang_b = use_angle_bias(cfg);
   const bool size_b = use_size_bias(cfg);
   const bool los_b = use_los_bias(cfg);
+  const bool rng_b = use_range_bias(cfg);
+  const double known_rb = static_cast<double>(m.range_bias_m);
   Vec<M> z;
   z(0, 0) = static_cast<double>(m.heading_deg - m.heading_bias_deg) * kDegToRad;
   z(1, 0) = static_cast<double>(m.attack_deg - m.attack_bias_deg) * kDegToRad;
@@ -381,8 +426,8 @@ int ekf_update(Vec<N>& x, Mat<N, N>& P, const Meas& m, const Config& cfg) {
   R(2, 2) = ss * ss;
   R(3, 3) = ss * ss;
 
-  const Mat<M, N> H = H_of(x, cam, ang_b, size_b);
-  const Vec<M> zhat = h_of(x, cam, ang_b, size_b);
+  const Mat<M, N> H = H_of(x, cam, ang_b, size_b, rng_b, known_rb);
+  const Vec<M> zhat = h_of(x, cam, ang_b, size_b, rng_b, known_rb);
   const Mat<N, M> C = P * transpose(H);
   const Mat<M, M> S = H * C + R;
 
@@ -404,10 +449,12 @@ int ekf_update(Vec<N>& x, Mat<N, N>& P, const Meas& m, const Config& cfg) {
   return 1;
 }
 
-Estimate pack_estimate(const Vec<N>& x, const Mat<N, N>& P, const Camera& cam) {
+Estimate pack_estimate(const Vec<N>& x, const Mat<N, N>& P, const Camera& cam,
+                       const Config& cfg, double known_rb) {
   Estimate out;
   const Intr ic = intr_of(cam);
-  const Vec<M> z = h_of(x, ic, false, false);
+  const Vec<M> z =
+      h_of(x, ic, false, false, use_range_bias(cfg), known_rb);
   const double w = std::max(2.0, z(2, 0));
   const double h = std::max(2.0, z(3, 0));
   out.box.u0 = static_cast<float>(ic.cu - 0.5 * w);
@@ -435,6 +482,7 @@ Estimate pack_estimate(const Vec<N>& x, const Mat<N, N>& P, const Camera& cam) {
       std::atan2(dir.z, std::max(horiz, 1e-6f)) * static_cast<float>(kRadToDeg);
   out.heading_bias_deg = static_cast<float>(x(8, 0) * kRadToDeg);
   out.attack_bias_deg = static_cast<float>(x(9, 0) * kRadToDeg);
+  out.range_bias_m = static_cast<float>(x(kRngB, 0));
   out.valid = finite_state(x);
   return out;
 }
@@ -488,6 +536,7 @@ void BBoxEkf::reset() {
   t_ = 0;
   updates_ = 0;
   rejects_ = 0;
+  last_range_bias_known_ = 0;
 }
 
 bool BBoxEkf::push(const Meas& m) {
@@ -501,6 +550,7 @@ bool BBoxEkf::push(const Meas& m) {
     have_ = true;
     filt_valid_ = true;
     t_ = m.t;
+    last_range_bias_known_ = m.range_bias_m;
     ++updates_;
     return true;
   }
@@ -521,6 +571,7 @@ bool BBoxEkf::push(const Meas& m) {
   }
   unpack(x, P, x_, P_);
   t_ = m.t;
+  last_range_bias_known_ = m.range_bias_m;
   ++updates_;
   return rc != 0;
 }
@@ -537,7 +588,7 @@ Estimate BBoxEkf::predict(const Camera& cam_query, const Vec3& own_vel,
   dt = std::min(std::max(dt, 0.0), 3.0);
   predict_linear(x, P, dt, own_vel, cfg_, cam_query.fx);
   if (!finite_state(x)) return out;
-  return pack_estimate(x, P, cam_query);
+  return pack_estimate(x, P, cam_query, cfg_, last_range_bias_known_);
 }
 
 }  // namespace bbox_ekf

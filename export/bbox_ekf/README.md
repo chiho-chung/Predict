@@ -10,7 +10,8 @@ This is the same bbox EKF used in the chase sim (timestamped updates, delay remo
 |---|---|
 | `heading_deg` | LOS azimuth (world / NED) |
 | `attack_deg` | LOS elevation / pitch, negative = look down |
-| `heading_bias_deg`, `attack_bias_deg` | Optional known/calib offset. Leave 0 if unknown. |
+| `heading_bias_deg`, `attack_bias_deg` | Optional known/calib LOS offset. Leave 0 if unknown. |
+| `range_bias_m` | Optional known/calib range offset (metres). Leave 0 if unknown. |
 | `width_px`, `height_px` | Box size in pixels (angular size) |
 | `cam` | **Intrinsics + zoom at capture** (`fx` / FOV / image size). Not yaw/pitch. |
 | `own_vel` | Your velocity in the **same world / NED frame** as the LOS |
@@ -45,10 +46,11 @@ m.cam = bbox_ekf::Camera::from_fov(640, 480, 70.0f, zoom);
 // or: keep a Camera and call cam.set_zoom(zoom, 70.0f) each frame
 m.own_vel = {vn, ve, vd};   // world / NED, m/s, at capture
 m.t = stamp_s;              // capture time, not arrival time
-// optional: if you already know a LOS offset, pass it (deg). The filter
-// still estimates a residual when Config::los_bias_sigma_deg > 0.
+// optional: known LOS / range calib. Leave 0 if unknown. The filter
+// estimates a residual only when the matching Config sigma is > 0.
 // m.heading_bias_deg = calib_hdg;
 // m.attack_bias_deg  = calib_att;
+// m.range_bias_m     = calib_range_m;
 ekf.push(m);
 
 // --- fast path: every control tick ---
@@ -62,7 +64,7 @@ auto fut  = ekf.predict(cam_now, vel_now, t_now + 0.5);  // +H future LOS
 if (now.valid) {
   // now.heading_deg, now.attack_deg  — bias removed (from p_rel)
   // now.heading_bias_deg, now.attack_bias_deg  — estimated residual
-  // now.range_m, now.box, now.vel_world
+  // now.range_m, now.range_bias_m, now.box, now.vel_world
 }
 ```
 
@@ -92,6 +94,8 @@ cfg.sigma_accel     = 8.0f;   // raise if the target jinks hard
 cfg.meas_corr       = 0.6f;   // 0 = disable size-bias whitening
 cfg.los_bias_sigma_deg = 0.0f;  // 0 = off (default). Set ~2 to estimate residual
 cfg.los_bias_walk_deg  = 0.02f; // deg/sqrt(s) when estimation is on
+cfg.range_bias_sigma_m = 0.0f;  // 0 = off (default). Set ~1 to estimate residual
+cfg.range_bias_walk_m  = 0.0f;  // freeze as constant when estimation is on
 ekf.set_config(cfg);
 ```
 
@@ -167,6 +171,62 @@ ekf.push(m);
 ```
 
 `ekf.set_config(cfg)` after construct is the same as passing `Config` in. Do not enable estimate (mode 2) on a clean LOS — range/LOS get slightly worse.
+
+## Range bias modes
+
+Same four modes and the same defaults as LOS (`sigma = 0`). Size and range share one observation (`width_px ≈ fx * size / range`), so a quiet track cannot tell a first-catch box error from a size error. Estimate only when range or `fx` is changing (jink, zoom, closing). **Known calib is the reliable remove.**
+
+| Knob | Where | What it does |
+|---|---|---|
+| `range_bias_sigma_m` | `Config` | `0` = do not estimate. `~1` = estimate a constant residual (m 1-sigma). |
+| `range_bias_m` | `Meas` each frame | Known/calib offset (metres). Subtracted in the size model. Leave `0` if unknown. |
+
+Angular size is read as `width_px = fx * size / (range + range_bias)`. `Estimate::range_m` is `|p_rel|` (bias removed). `Estimate::range_bias_m` is the estimated residual. Call `ekf.reset()` if you change mode on a live filter.
+
+### 1. Raw (default)
+
+```cpp
+bbox_ekf::Config cfg;
+cfg.range_bias_sigma_m = 0.0f;     // already 0
+bbox_ekf::BBoxEkf ekf(cfg);
+m.range_bias_m = 0;
+ekf.push(m);
+```
+
+### 2. Estimate
+
+Unknown offset; the filter tries to find it. Helps when own-motion or zoom changes range/`fx`. Can slightly worsen a quiet track — do not enable on a clean, smooth lock.
+
+```cpp
+bbox_ekf::Config cfg;
+cfg.range_bias_sigma_m = 1.0f;     // initial 1-sigma, metres
+cfg.range_bias_walk_m  = 0.0f;     // 0 = freeze as constant (first-catch)
+bbox_ekf::BBoxEkf ekf(cfg);
+m.range_bias_m = 0;                // unknown
+ekf.push(m);
+// now.range_m       — debiased geometry
+// now.range_bias_m  — what it estimated
+```
+
+### 3. Known calib (best if you have the offset)
+
+```cpp
+bbox_ekf::Config cfg;
+cfg.range_bias_sigma_m = 0.0f;     // do not also estimate a residual
+bbox_ekf::BBoxEkf ekf(cfg);
+m.range_bias_m = calib_range_m;    // bbox-implied range minus true, metres
+ekf.push(m);
+```
+
+### 4. Known + estimate leftover
+
+```cpp
+bbox_ekf::Config cfg;
+cfg.range_bias_sigma_m = 1.0f;
+bbox_ekf::BBoxEkf ekf(cfg);
+m.range_bias_m = calib_range_m;
+ekf.push(m);
+```
 
 ## Build
 

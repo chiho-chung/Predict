@@ -4,8 +4,7 @@
 #include <cmath>
 #include <cstdio>
 
-// Headless: feed the export EKF only world LOS + box size + fx (no yaw/pitch).
-// Same detections as the sim EKF (ideal gimbal). Score delay-removed LOS/range.
+// Headless: export EKF from sim detections (LOS + box + fx). Distance-focused.
 
 namespace {
 
@@ -65,30 +64,38 @@ bbox_ekf::Meas to_export(const TrackerMeas& m) {
   return out;
 }
 
-void run(const char* tag, TargetManeuver man, bool zoom_cycle, int steps) {
+void distort_box_range(bbox_ekf::Meas& m, float inj_m) {
+  if (std::fabs(inj_m) < 1e-6f) return;
+  const float w = std::max(2.0f, m.width_px);
+  const float r0 = std::max(1.0f, m.cam.fx * 0.36f / w);
+  const float s = r0 / std::max(0.5f, r0 + inj_m);
+  m.width_px *= s;
+  m.height_px *= s;
+}
+
+void run(const char* tag, TargetManeuver man, bool zoom_cycle, int steps,
+         const bbox_ekf::Config& ekf_cfg, float size_px = 4.0f) {
   SimConfig cfg = base();
   cfg.target.maneuver = man;
+  cfg.jitter.size_px = size_px;
   cfg.zoom.auto_cycle = zoom_cycle;
   cfg.zoom.min_zoom = 1.0f;
   cfg.zoom.max_zoom = 3.0f;
   cfg.zoom.period_s = 8.0f;
 
   Simulation sim(cfg);
-  bbox_ekf::BBoxEkf ekf;
+  bbox_ekf::BBoxEkf ekf(ekf_cfg);
 
-  Acc exp_h, exp_a, exp_r, exp_s, sim_h, sim_a, sim_r, sim_s;
-  int pushes = 0, rejects = 0;
+  Acc exp_h, exp_r, exp_s, rb, sim_r;
+  int rejects = 0;
 
   for (int i = 0; i < steps; ++i) {
     sim.step(0.01f);
     if (sim.meas_delivered_this_step()) {
       if (!ekf.push(to_export(sim.last_push()))) ++rejects;
-      ++pushes;
     }
-
     const auto& s = sim.snapshot();
     if (s.time < 2.0f || !s.los.origin.valid) continue;
-
     const bbox_ekf::Camera cam_q = bbox_ekf::Camera::from_fx(
         cfg.camera.width, cfg.camera.height, s.fx, s.fx);
     const auto now =
@@ -100,36 +107,105 @@ void run(const char* tag, TargetManeuver man, bool zoom_cycle, int steps) {
             : 0.0f;
     if (now.valid) {
       exp_h.add(wrap180(now.heading_deg - s.los.origin.heading_deg));
-      exp_a.add(wrap180(now.attack_deg - s.los.origin.attack_deg));
       exp_r.add(now.range_m - s.true_range_m);
+      rb.add(now.range_bias_m);
       if (true_w_m > 0.01f) exp_s.add(now.size_w_m - true_w_m);
     }
-    if (s.los.estimate.valid) {
-      sim_h.add(wrap180(s.los.estimate.heading_deg - s.los.origin.heading_deg));
-      sim_a.add(wrap180(s.los.estimate.attack_deg - s.los.origin.attack_deg));
-    }
-    if (s.track_now.valid && s.track_now.range_m > 0.1f) {
-      sim_r.add(s.range_err_m);
-      if (true_w_m > 0.01f) sim_s.add(s.track_now.size_w_m - true_w_m);
-    }
+    if (s.track_now.valid && s.track_now.range_m > 0.1f) sim_r.add(s.range_err_m);
   }
 
   std::printf(
-      "%-10s  export  hdg=%.3f  att=%.3f  rng=%.2f  size=%.3f  push=%d  rej=%d\n",
-      tag, exp_h.rms(), exp_a.rms(), exp_r.rms(), exp_s.rms(), pushes, rejects);
-  std::printf("%-10s  simEKF  hdg=%.3f  att=%.3f  rng=%.2f  size=%.3f  rej=%d\n",
-              tag, sim_h.rms(), sim_a.rms(), sim_r.rms(), sim_s.rms(),
-              sim.snapshot().tracker_rejects);
+      "%-14s  rng_rms=%.2f  rng_bias=%+.2f  size=%.3f  hdg=%.3f  "
+      "b_hat=%+.2f  rej=%d  (simEKF rng_rms=%.2f)\n",
+      tag, exp_r.rms(), exp_r.mean(), exp_s.rms(), exp_h.rms(), rb.mean(),
+      rejects, sim_r.rms());
 }
 
-}  // namespace
+void run_first_catch(const char* tag, float inj_m, float est_sigma_m) {
+  SimConfig cfg = base();
+  Simulation sim(cfg);
+  bbox_ekf::Config ekf_cfg;
+  ekf_cfg.range_bias_sigma_m = est_sigma_m;
+  bbox_ekf::BBoxEkf ekf(ekf_cfg);
 
-void run_bias(const char* tag, float inj_h, float inj_a, bool pass_known,
-              float est_sigma_deg) {
+  Acc early, late, rb;
+  int rejects = 0;
+  bool first = true;
+
+  for (int i = 0; i < 2000; ++i) {
+    sim.step(0.01f);
+    if (sim.meas_delivered_this_step()) {
+      bbox_ekf::Meas m = to_export(sim.last_push());
+      if (first) {
+        distort_box_range(m, inj_m);
+        first = false;
+      }
+      if (!ekf.push(m)) ++rejects;
+    }
+    const auto& s = sim.snapshot();
+    if (!s.los.origin.valid) continue;
+    const bbox_ekf::Camera cam_q = bbox_ekf::Camera::from_fx(
+        cfg.camera.width, cfg.camera.height, s.fx, s.fx);
+    const auto now =
+        ekf.predict(cam_q, {s.drone.vel.x, s.drone.vel.y, s.drone.vel.z},
+                    s.time);
+    if (!now.valid) continue;
+    rb.add(now.range_bias_m);
+    const double err = now.range_m - s.true_range_m;
+    if (s.time >= 2.0f && s.time < 8.0f) early.add(err);
+    if (s.time >= 8.0f) late.add(err);
+  }
+
+  std::printf(
+      "%-14s  t2-8 rms=%.2f bias=%+.2f  t>8 rms=%.2f bias=%+.2f  "
+      "b_hat=%+.2f (inj first %+0.1f)  rej=%d\n",
+      tag, early.rms(), early.mean(), late.rms(), late.mean(), rb.mean(),
+      inj_m, rejects);
+}
+
+void run_range_bias(const char* tag, float inj_m, bool pass_known,
+                    float est_sigma_m) {
+  SimConfig cfg = base();
+  Simulation sim(cfg);
+  bbox_ekf::Config ekf_cfg;
+  ekf_cfg.range_bias_sigma_m = est_sigma_m;
+  bbox_ekf::BBoxEkf ekf(ekf_cfg);
+
+  Acc exp_r, rb;
+  int rejects = 0;
+
+  for (int i = 0; i < 2000; ++i) {
+    sim.step(0.01f);
+    if (sim.meas_delivered_this_step()) {
+      bbox_ekf::Meas m = to_export(sim.last_push());
+      distort_box_range(m, inj_m);
+      if (pass_known) m.range_bias_m = inj_m;
+      if (!ekf.push(m)) ++rejects;
+    }
+    const auto& s = sim.snapshot();
+    if (s.time < 8.0f || !s.los.origin.valid) continue;
+    const bbox_ekf::Camera cam_q = bbox_ekf::Camera::from_fx(
+        cfg.camera.width, cfg.camera.height, s.fx, s.fx);
+    const auto now =
+        ekf.predict(cam_q, {s.drone.vel.x, s.drone.vel.y, s.drone.vel.z},
+                    s.time);
+    if (!now.valid) continue;
+    exp_r.add(now.range_m - s.true_range_m);
+    rb.add(now.range_bias_m);
+  }
+
+  std::printf(
+      "%-14s  rng_rms=%.2f  rng_bias=%+.2f  b_hat=%+.2f (inj %+0.1f)  rej=%d\n",
+      tag, exp_r.rms(), exp_r.mean(), rb.mean(), inj_m, rejects);
+}
+
+void run_los_bias(const char* tag, float inj_h, float inj_a, bool pass_known,
+                 float est_sigma_deg) {
   SimConfig cfg = base();
   Simulation sim(cfg);
   bbox_ekf::Config ekf_cfg;
   ekf_cfg.los_bias_sigma_deg = est_sigma_deg;
+  ekf_cfg.range_bias_sigma_m = 0.0f;
   bbox_ekf::BBoxEkf ekf(ekf_cfg);
 
   Acc exp_h, exp_a, bh, ba;
@@ -168,15 +244,41 @@ void run_bias(const char* tag, float inj_h, float inj_a, bool pass_known,
       rejects);
 }
 
+}  // namespace
+
 int main() {
-  std::printf("export BBoxEkf  (LOS + box + fx, no yaw/pitch)\n");
-  std::printf("20s  10Hz  4px jitter  timing on  ideal gimbal\n\n");
-  run("smooth", TargetManeuver::Smooth, false, 2000);
-  run("jink", TargetManeuver::Jink, false, 2000);
-  run("zoom1-3x", TargetManeuver::Smooth, true, 2000);
+  bbox_ekf::Config off;
+  off.range_bias_sigma_m = 0.0f;
+  bbox_ekf::Config on;
+  on.range_bias_sigma_m = 1.0f;
+  on.range_bias_walk_m = 0.0f;
+
+  std::printf("export BBoxEkf  distance-focused  20s  10Hz  timing on\n\n");
+  std::printf("--- range estimate OFF (default) vs ON (sigma=1, walk=0) ---\n");
+  run("smooth/off", TargetManeuver::Smooth, false, 2000, off);
+  run("smooth/on", TargetManeuver::Smooth, false, 2000, on);
+  run("jink/off", TargetManeuver::Jink, false, 2000, off);
+  run("jink/on", TargetManeuver::Jink, false, 2000, on);
+  run("zoom/off", TargetManeuver::Smooth, true, 2000, off);
+  run("zoom/on", TargetManeuver::Smooth, true, 2000, on);
+
+  std::printf("\n--- first-catch stress  size jitter 8 px ---\n");
+  run("sz8/off", TargetManeuver::Smooth, false, 2000, off, 8.0f);
+  run("sz8/on", TargetManeuver::Smooth, false, 2000, on, 8.0f);
+
+  std::printf("\n--- first box only +2 m, later boxes clean ---\n");
+  run_first_catch("raw", 2.0f, 0.0f);
+  run_first_catch("estimate", 2.0f, 1.0f);
+
+  std::printf("\n--- inject +2 m every box (score t>8s) ---\n");
+  run_range_bias("raw", 2.0f, false, 0.0f);
+  run_range_bias("estimate", 2.0f, false, 1.0f);
+  run_range_bias("known calib", 2.0f, true, 0.0f);
+  run_range_bias("known+est", 2.0f, true, 1.0f);
+
   std::printf("\nLOS bias  inject +1.5 heading / -0.8 attack  (score t>8s)\n");
-  run_bias("raw (no corr)", 1.5f, -0.8f, false, 0.0f);
-  run_bias("estimate", 1.5f, -0.8f, false, 2.0f);
-  run_bias("known calib", 1.5f, -0.8f, true, 0.0f);
+  run_los_bias("raw (no corr)", 1.5f, -0.8f, false, 0.0f);
+  run_los_bias("estimate", 1.5f, -0.8f, false, 2.0f);
+  run_los_bias("known calib", 1.5f, -0.8f, true, 0.0f);
   return 0;
 }
