@@ -1,6 +1,6 @@
 #pragma once
 
-#include "gfx.hpp"
+#include "ui/gfx.hpp"
 
 #include <cstdint>
 #include <string>

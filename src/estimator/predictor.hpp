@@ -1,8 +1,8 @@
 #pragma once
 
-#include "drone_model.hpp"
-#include "linalg.hpp"
-#include "vec.hpp"
+#include "sim/drone_model.hpp"
+#include "math/linalg.hpp"
+#include "sim/types.hpp"
 
 // Image-plane bounding box predictor.
 //

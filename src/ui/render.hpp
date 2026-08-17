@@ -1,8 +1,8 @@
 #pragma once
 
-#include "drone_model.hpp"
-#include "gfx.hpp"
-#include "sim.hpp"
+#include "sim/drone_model.hpp"
+#include "ui/gfx.hpp"
+#include "sim/sim.hpp"
 
 #include <cstdint>
 #include <string>

@@ -226,9 +226,22 @@ compare against the ideal gimbal.
 | `F1`-`F5` | Show/hide a trace and its error trace (plot window) |
 | `F5` / Enter | History: reload index / load selected timeseries |
 
+## Source layout
+
+| Folder | What lives there |
+|---|---|
+| `src/app/` | `main.cpp`, auto-bench |
+| `src/sim/` | world sim, drone/gimbal, shared types (`types.hpp`) |
+| `src/estimator/` | bbox / LOS filters (`predictor.*`) |
+| `src/ui/` | Win32 HUD, plot, history |
+| `src/io/` | experiment CSV writer |
+| `src/math/` | small matrix helpers (`linalg.hpp`) |
+
+Include path is `-Isrc`. Headers are `"sim/sim.hpp"`, `"estimator/predictor.hpp"`, and so on.
+
 ## Estimator
 
-`src/predictor.hpp` / `src/predictor.cpp` holds nine selectable estimators. Cycle
+`src/estimator/predictor.hpp` / `src/estimator/predictor.cpp` holds nine selectable estimators. Cycle
 them at runtime with `E` / `W`. **EKF** is the main predictor for real-world
 use; **IMM-EKF** is the second candidate. The rest stay in the bench for A/B.
 All of them consume the per-frame timestamp.

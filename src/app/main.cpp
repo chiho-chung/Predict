@@ -1,10 +1,10 @@
-#include "bench.hpp"
-#include "csv_log.hpp"
-#include "history.hpp"
-#include "plot.hpp"
-#include "predictor.hpp"
-#include "render.hpp"
-#include "sim.hpp"
+#include "app/bench.hpp"
+#include "io/csv_log.hpp"
+#include "ui/history.hpp"
+#include "ui/plot.hpp"
+#include "estimator/predictor.hpp"
+#include "ui/render.hpp"
+#include "sim/sim.hpp"
 
 #include <chrono>
 #include <cmath>

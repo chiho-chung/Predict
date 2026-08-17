@@ -1,6 +1,6 @@
-#include "render.hpp"
+#include "ui/render.hpp"
 
-#include "gfx.hpp"
+#include "ui/gfx.hpp"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>

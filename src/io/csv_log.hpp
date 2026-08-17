@@ -1,6 +1,6 @@
 #pragma once
 
-#include "vec.hpp"
+#include "sim/types.hpp"
 
 #include <cstdio>
 #include <string>

@@ -5,14 +5,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_executable(drone_chase_sim
-  src/main.cpp
-  src/sim.cpp
-  src/render.cpp
-  src/predictor.cpp
-  src/plot.cpp
-  src/csv_log.cpp
-  src/bench.cpp
-  src/history.cpp
+  src/app/main.cpp
+  src/sim/sim.cpp
+  src/ui/render.cpp
+  src/estimator/predictor.cpp
+  src/ui/plot.cpp
+  src/io/csv_log.cpp
+  src/app/bench.cpp
+  src/ui/history.cpp
 )
 
 target_include_directories(drone_chase_sim PRIVATE src)

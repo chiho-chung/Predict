@@ -1,8 +1,8 @@
-#include "bench.hpp"
+#include "app/bench.hpp"
 
-#include "csv_log.hpp"
-#include "predictor.hpp"
-#include "sim.hpp"
+#include "io/csv_log.hpp"
+#include "estimator/predictor.hpp"
+#include "sim/sim.hpp"
 
 #include <cerrno>
 #include <cmath>

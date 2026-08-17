@@ -13,7 +13,8 @@ if not exist build mkdir build
 
 echo Compiling drone_chase_sim...
 g++ -std=c++17 -O2 -Wall -Wextra -Isrc ^
-  src\main.cpp src\sim.cpp src\render.cpp src\predictor.cpp src\plot.cpp src\csv_log.cpp src\bench.cpp src\history.cpp ^
+  src\app\main.cpp src\sim\sim.cpp src\ui\render.cpp src\estimator\predictor.cpp ^
+  src\ui\plot.cpp src\io\csv_log.cpp src\app\bench.cpp src\ui\history.cpp ^
   -o build\drone_chase_sim.exe ^
   -static -static-libgcc -static-libstdc++ ^
   -lgdi32 -luser32

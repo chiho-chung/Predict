@@ -1,5 +1,5 @@
 #include "bbox_ekf.hpp"
-#include "sim.hpp"
+#include "sim/sim.hpp"
 
 #include <cmath>
 #include <cstdio>

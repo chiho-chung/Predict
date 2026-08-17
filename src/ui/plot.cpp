@@ -1,4 +1,4 @@
-#include "plot.hpp"
+#include "ui/plot.hpp"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>

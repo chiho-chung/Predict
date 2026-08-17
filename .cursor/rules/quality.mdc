@@ -11,8 +11,9 @@ standalone (hpp + cpp + its README; no sim headers, no Eigen).
 
 ## Structure
 
-- Estimators: `src/predictor.*`. Export copy: `export/bbox_ekf/`.
-- Sim / GUI: `src/sim.*`, `src/render.*`, `src/history.*`. Headless: `src/bench.*`.
+- Estimators: `src/estimator/`. Export copy: `export/bbox_ekf/`.
+- Sim / types: `src/sim/`. GUI: `src/ui/`. Logs: `src/io/`. App: `src/app/`.
+- Math: `src/math/` (`linalg.hpp`). Shared structs: `src/sim/types.hpp`.
 - Checks: `tools/*_check.cpp`, `tools/check.bat`. Build: `build.bat` → `build/`.
 
 Prefer extending a type or function over a parallel ad-hoc path. Update

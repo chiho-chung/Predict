@@ -12,7 +12,7 @@ set "PATH=%MSYS%;%PATH%"
 if not exist build mkdir build
 
 g++ -std=c++17 -O2 -Wall -Wextra -Isrc ^
-  tools\rate_check.cpp src\sim.cpp src\predictor.cpp src\csv_log.cpp ^
+  tools\rate_check.cpp src\sim\sim.cpp src\estimator\predictor.cpp src\io\csv_log.cpp ^
   -o build\rate_check.exe -static
 if errorlevel 1 exit /b 1
 

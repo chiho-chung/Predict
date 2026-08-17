@@ -1,6 +1,6 @@
-#include "csv_log.hpp"
+#include "io/csv_log.hpp"
 
-#include "predictor.hpp"
+#include "estimator/predictor.hpp"
 
 #include <cerrno>
 #include <cmath>

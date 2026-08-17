@@ -1,5 +1,5 @@
-#include "csv_log.hpp"
-#include "sim.hpp"
+#include "io/csv_log.hpp"
+#include "sim/sim.hpp"
 
 #include <cmath>
 #include <cstdio>

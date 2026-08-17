@@ -1,5 +1,5 @@
-#include "sim.hpp"
-#include "drone_model.hpp"
+#include "sim/sim.hpp"
+#include "sim/drone_model.hpp"
 
 #include <algorithm>
 #include <cmath>

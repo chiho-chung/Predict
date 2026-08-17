@@ -1,8 +1,8 @@
 #pragma once
 
-#include "drone_model.hpp"
-#include "predictor.hpp"
-#include "vec.hpp"
+#include "sim/drone_model.hpp"
+#include "estimator/predictor.hpp"
+#include "sim/types.hpp"
 
 #include <cstdint>
 #include <vector>

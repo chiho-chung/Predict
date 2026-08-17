@@ -1,7 +1,7 @@
 #pragma once
 
-#include "gfx.hpp"
-#include "sim.hpp"
+#include "ui/gfx.hpp"
+#include "sim/sim.hpp"
 
 #include <cstdint>
 #include <string>
