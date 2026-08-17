@@ -292,7 +292,7 @@ int main() {
   run("zoom/off", TargetManeuver::Smooth, true, 2000, off);
   run("zoom/on", TargetManeuver::Smooth, true, 2000, on);
 
-  std::printf("\n--- first-catch stress  size jitter +/-20 percent ---\n");
+  std::printf("\n--- first-catch stress  size jitter +/-20%% ---\n");
   run("sz20/off", TargetManeuver::Smooth, false, 2000, off, 0.20f);
   run("sz20/on", TargetManeuver::Smooth, false, 2000, on, 0.20f);
 

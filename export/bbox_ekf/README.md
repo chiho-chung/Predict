@@ -87,11 +87,12 @@ Defaults are the sim’s EKF:
 
 ```cpp
 bbox_ekf::Config cfg;
-cfg.sigma_los_deg   = 0.6f;   // LOS noise, degrees (independent of fx / zoom)
-cfg.sigma_size_frac = 0.10f;  // box width/height noise, fraction of size (±10%)
+cfg.sigma_los_deg   = 0.70f;  // heading/attack 1-sigma, deg (not pixel-centre)
+cfg.sigma_size_frac = 0.10f;  // box width/height 1-sigma, fraction of box
 cfg.size_prior_m    = 0.36f;  // metres of target that span the box
 cfg.sigma_accel     = 8.0f;   // raise if the target jinks hard
 cfg.meas_corr       = 0.6f;   // 0 = disable size-bias whitening
+cfg.meas_bias_sigma_frac = 0.10f;  // GM size-bias 1-sigma (fraction)
 cfg.los_bias_sigma_deg = 0.0f;  // 0 = off (default). Set ~2 to estimate residual
 cfg.los_bias_walk_deg  = 0.02f; // deg/sqrt(s) when estimation is on
 cfg.range_bias_sigma_m = 0.0f;  // 0 = off (default). Set ~1 to estimate residual
@@ -99,9 +100,11 @@ cfg.range_bias_walk_m  = 0.0f;  // freeze as constant when estimation is on
 ekf.set_config(cfg);
 ```
 
-If the target is not ~30 cm, set `size_prior_m` to the width that actually fills the box.
+There is no `sigma_px_center`. The measurement is world LOS + box size, so LOS
+noise is `sigma_los_deg` (radians in `R`); it is not converted from a fictional
+bbox-centre pixel.
 
-LOS measurement noise is `sigma_los_deg` (radians in `R`). Box-centre pixels are not an input. Size noise is `sigma_size_frac` of the predicted width/height, matching ±10% detector jitter.
+If the target is not ~30 cm, set `size_prior_m` to the width that actually fills the box.
 
 ## LOS bias modes
 
@@ -183,7 +186,7 @@ Same four modes and the same defaults as LOS (`sigma = 0`). Size and range share
 | `range_bias_sigma_m` | `Config` | `0` = do not estimate. `~1` = estimate a constant residual (m 1-sigma). |
 | `range_bias_m` | `Meas` each frame | Known/calib offset (metres). Subtracted in the size model. Leave `0` if unknown. |
 
-Angular size is read as `width_px = fx * size / (range + range_bias)`. `Estimate::range_m` is `|p_rel|` (bias removed). `Estimate::range_bias_m` is the estimated residual. Call `ekf.reset()` if you change mode on a live filter.
+Angular size is read as `width_px = fx * size / (range + range_bias) * (1 + size_frac)`. `Estimate::range_m` is `|p_rel|` (bias removed). `Estimate::range_bias_m` is the estimated residual. Call `ekf.reset()` if you change mode on a live filter.
 
 ### 1. Raw (default)
 

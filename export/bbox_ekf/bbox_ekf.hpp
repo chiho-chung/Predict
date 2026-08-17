@@ -20,14 +20,15 @@
 //   - delay-removed LOS at t_now, or future LOS at t_now + H
 //   - slow heading/attack bias and range bias (if enabled), removed from
 //     the reported LOS / range
+//   - fractional detector size bias (EMA jitter as ±% of box)
 //
 // State: [p_rel(3) | v_target(3) | width_m | height_m | los_bias(2) |
-//         size_frac_bias(2) | range_bias]
+//         size_bias_frac(2) | range_bias]
 // Dynamics are linear (own vel is a known input). Measurement is
 // [heading, attack, width_px, height_px]. Angular size uses
-//   width_px = fx * width_m / (range + range_bias) * (1 + size_frac)
-// Size noise is a fraction of predicted box size, not a fixed pixel count.
-// LOS is heading/attack in degrees — there is no box-centre pixel measurement.
+//   width_px = fx * width_m / (range + range_bias) * (1 + size_bias_frac)
+// so a first-catch box error can sit in range_bias instead of p_rel,
+// and percent jitter is estimated rather than treated as a fixed pixel offset.
 
 namespace bbox_ekf {
 
@@ -82,19 +83,21 @@ struct Camera {
 };
 
 struct Config {
-  float sigma_los_deg = 0.6f;    // 1-sigma on heading/attack (not box-centre px)
-  float sigma_size_frac = 0.10f;  // 1-sigma on width/height, fraction of size
+  // LOS is already world heading/attack — there is no bbox-centre pixel
+  // measurement. ~0.70 deg is 4 px at fx ≈ 343 (sim 640x480, 70° FOV).
+  float sigma_los_deg = 0.70f;
+  float sigma_size_frac = 0.10f;  // 1-sigma on width/height, fraction of box
   float sigma_own_vel = 0.15f;   // own-velocity measurement 1-sigma, m/s
   float size_prior_m = 0.36f;    // metres of target that span the box
   float size_prior_sigma_m = 0.12f;
   float size_walk = 0.01f;       // m/sqrt(s) random walk on extent
   float gate_chi2 = 80.0f;       // reject if Mahalanobis^2 exceeds this
   float sigma_accel = 8.0f;      // process noise, m/s^2
-  // Detector jitter is an EMA on fractional box size. 0 disables size-bias
-  // states (raw R uses the full sigma_size_frac).
+  // Detector jitter is an EMA on box size as a fraction. 0 disables the
+  // size-bias states (raw R on width/height).
   float meas_corr = 0.6f;
   float meas_corr_tau_s = 0.10f;
-  float meas_bias_sigma_frac = 0.05f;  // size EMA 1-sigma, fraction of box
+  float meas_bias_sigma_frac = 0.10f;  // GM size-bias 1-sigma, fraction
   // Slow heading/attack bias (gimbal / sensor offset). Estimated and removed
   // from the reported LOS. Set sigma to 0 if you do not want it estimated.
   float los_bias_sigma_deg = 0.0f;  // initial 1-sigma; 0 = do not estimate

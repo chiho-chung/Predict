@@ -148,11 +148,6 @@ double vec_comp(const Vec3& v, int i) {
 
 bool use_meas_bias(const TrackerConfig& cfg) { return cfg.meas_corr >= 0.05f; }
 
-double size_sigma_px(float frac, double px) {
-  const double f = std::max(0.01, static_cast<double>(frac));
-  return std::max(0.4, f * std::max(2.0, px));
-}
-
 bbox_ekf::Config export_cfg_of(const TrackerConfig& cfg) {
   bbox_ekf::Config out;
   out.sigma_los_deg = cfg.sigma_los_deg;
@@ -279,9 +274,9 @@ TrackEstimate track_from_imm(const bbox_imm_ekf::Estimate& e,
   return out;
 }
 
-// z = [u, v, width_px, height_px]. Centre bias is additive pixels; size bias
-// is a fraction of the geometric box. Bias is detector error, so it is added
-// only when comparing to a measurement, never when reprojecting a world estimate.
+// z = [u, v, width_px, height_px]. Detector bias is applied only when
+// comparing to a measurement, never when reprojecting a world estimate.
+// Centre bias is additive pixels; size bias is a fraction of the geometric box.
 Vec<M> h_of(const Vec<N>& x, const ProjModel& pm, bool with_bias) {
   const double px = x(0, 0), py = x(1, 0), pz = x(2, 0);
   double zc = axis_dot(pm.fwd, px, py, pz);
@@ -290,19 +285,17 @@ Vec<M> h_of(const Vec<N>& x, const ProjModel& pm, bool with_bias) {
   const double yc = axis_dot(pm.up, px, py, pz);
   const double sw = std::max(kMinSize, x(6, 0));
   const double sh = std::max(kMinSize, x(7, 0));
-  const double geom_w = pm.fx * sw / zc;
-  const double geom_h = pm.fy * sh / zc;
+  const double bw = with_bias ? x(10, 0) : 0.0;
+  const double bh = with_bias ? x(11, 0) : 0.0;
 
   Vec<M> z;
   z(0, 0) = pm.cu + pm.fx * xc / zc;
   z(1, 0) = pm.cv - pm.fy * yc / zc;
-  z(2, 0) = geom_w;
-  z(3, 0) = geom_h;
+  z(2, 0) = pm.fx * sw / zc * (1.0 + bw);
+  z(3, 0) = pm.fy * sh / zc * (1.0 + bh);
   if (with_bias) {
     z(0, 0) += x(8, 0);
     z(1, 0) += x(9, 0);
-    z(2, 0) *= (1.0 + x(10, 0));
-    z(3, 0) *= (1.0 + x(11, 0));
   }
   return z;
 }
@@ -316,10 +309,12 @@ Mat<M, N> H_of(const Vec<N>& x, const ProjModel& pm, bool with_bias) {
   const double sw = std::max(kMinSize, x(6, 0));
   const double sh = std::max(kMinSize, x(7, 0));
   const double inv = 1.0 / zc;
-  const double fw = with_bias ? (1.0 + x(10, 0)) : 1.0;
-  const double fh = with_bias ? (1.0 + x(11, 0)) : 1.0;
-  const double geom_w = pm.fx * sw * inv;
-  const double geom_h = pm.fy * sh * inv;
+  const double bw = with_bias ? x(10, 0) : 0.0;
+  const double bh = with_bias ? x(11, 0) : 0.0;
+  const double scale_w = 1.0 + bw;
+  const double scale_h = 1.0 + bh;
+  const double wg = pm.fx * sw * inv;
+  const double hg = pm.fy * sh * inv;
 
   Mat<M, N> H;
   for (int i = 0; i < 3; ++i) {
@@ -328,16 +323,16 @@ Mat<M, N> H_of(const Vec<N>& x, const ProjModel& pm, bool with_bias) {
     const double c = vec_comp(pm.fwd, i);
     H(0, i) = pm.fx * inv * (a - xc * inv * c);
     H(1, i) = -pm.fy * inv * (b - yc * inv * c);
-    H(2, i) = -pm.fx * sw * inv * inv * c * fw;
-    H(3, i) = -pm.fy * sh * inv * inv * c * fh;
+    H(2, i) = -pm.fx * sw * inv * inv * c * scale_w;
+    H(3, i) = -pm.fy * sh * inv * inv * c * scale_h;
   }
-  H(2, 6) = pm.fx * inv * fw;
-  H(3, 7) = pm.fy * inv * fh;
+  H(2, 6) = pm.fx * inv * scale_w;
+  H(3, 7) = pm.fy * inv * scale_h;
   if (with_bias) {
     H(0, 8) = 1.0;
     H(1, 9) = 1.0;
-    H(2, 10) = geom_w;
-    H(3, 11) = geom_h;
+    H(2, 10) = wg;
+    H(3, 11) = hg;
   }
   return H;
 }
@@ -352,17 +347,23 @@ Vec<M> meas_of(const BBox& b) {
   return z;
 }
 
-Mat<M, M> R_of(const TrackerConfig& cfg, bool with_bias, double w_px,
-               double h_px) {
+Mat<M, M> R_of(const TrackerConfig& cfg, const BBox& box, bool with_bias) {
   Mat<M, M> R;
   double sc = std::max(0.2f, cfg.sigma_px_center);
-  double leftover = 1.0;
-  if (with_bias) leftover = std::max(0.2, 1.0 - static_cast<double>(cfg.meas_corr));
-  if (with_bias) sc = std::max(0.4, sc * leftover);
-  const double ss_w =
-      std::max(0.4, size_sigma_px(cfg.sigma_size_frac, w_px) * leftover);
-  const double ss_h =
-      std::max(0.4, size_sigma_px(cfg.sigma_size_frac, h_px) * leftover);
+  const double w = std::max(2.0, static_cast<double>(box.width()));
+  const double h = std::max(2.0, static_cast<double>(box.height()));
+  double ss_w = static_cast<double>(cfg.sigma_size_frac) * w;
+  double ss_h = static_cast<double>(cfg.sigma_size_frac) * h;
+  // Colored part lives in the bias states; R is the white leftover. Floor at
+  // 1 px so a small leftover percent cannot lock a first-catch range error.
+  if (with_bias) {
+    const double leftover = 1.0 - static_cast<double>(cfg.meas_corr);
+    sc = std::max(0.4, sc * leftover);
+    ss_w *= leftover;
+    ss_h *= leftover;
+  }
+  ss_w = std::max(1.0, ss_w);
+  ss_h = std::max(1.0, ss_h);
   R(0, 0) = sc * sc;
   R(1, 1) = sc * sc;
   R(2, 2) = ss_w * ss_w;
@@ -412,9 +413,10 @@ void predict_linear(Vec<N>& x, Mat<N, N>& P, double dt, const Vec3& own_vel,
     const double tau = std::max(0.02, static_cast<double>(cfg.meas_corr_tau_s));
     const double corr = std::min(0.98, std::max(0.01, static_cast<double>(cfg.meas_corr)));
     const double rho = std::exp(dt * std::log(corr) / tau);
-    const double sig_c = std::max(0.2, static_cast<double>(cfg.meas_bias_sigma_px));
-    const double sig_f =
-        std::max(0.001, static_cast<double>(cfg.meas_bias_sigma_frac));
+    const double sig_px =
+        std::max(0.2, static_cast<double>(cfg.meas_bias_sigma_px));
+    const double sig_frac =
+        std::max(0.02, static_cast<double>(cfg.meas_bias_sigma_frac));
     for (int i = 8; i < N; ++i) {
       x(i, 0) *= rho;
       for (int j = 0; j < 8; ++j) {
@@ -425,10 +427,12 @@ void predict_linear(Vec<N>& x, Mat<N, N>& P, double dt, const Vec3& own_vel,
     for (int i = 8; i < N; ++i) {
       for (int j = 8; j < N; ++j) P(i, j) *= rho * rho;
     }
-    P(8, 8) += (1.0 - rho * rho) * sig_c * sig_c;
-    P(9, 9) += (1.0 - rho * rho) * sig_c * sig_c;
-    P(10, 10) += (1.0 - rho * rho) * sig_f * sig_f;
-    P(11, 11) += (1.0 - rho * rho) * sig_f * sig_f;
+    const double q_px = (1.0 - rho * rho) * sig_px * sig_px;
+    const double q_fr = (1.0 - rho * rho) * sig_frac * sig_frac;
+    P(8, 8) += q_px;
+    P(9, 9) += q_px;
+    P(10, 10) += q_fr;
+    P(11, 11) += q_fr;
   }
 }
 
@@ -473,8 +477,8 @@ double apply_meas_update(Vec<N>& x, Mat<N, N>& P, const Vec<MD>& z,
   P = la::symmetrize<N>(P - K * la::transpose(C));
   x(6, 0) = std::max(kMinSize, x(6, 0));
   x(7, 0) = std::max(kMinSize, x(7, 0));
-  x(10, 0) = std::max(-0.85, std::min(2.0, x(10, 0)));
-  x(11, 0) = std::max(-0.85, std::min(2.0, x(11, 0)));
+  x(10, 0) = std::max(-0.8, std::min(0.8, x(10, 0)));
+  x(11, 0) = std::max(-0.8, std::min(0.8, x(11, 0)));
 
   if constexpr (MD == 2) return gauss_likelihood2(r, S, d2);
   else return gauss_likelihood(r, S, d2);
@@ -540,14 +544,15 @@ void TargetFilter::init(const TrackerMeas& m, const TrackerConfig& cfg) {
   P(7, 7) = ss * ss;
 
   if (use_meas_bias(cfg)) {
-    const double sb = std::max(0.2, static_cast<double>(cfg.meas_bias_sigma_px));
-    const double sf =
-        std::max(0.001, static_cast<double>(cfg.meas_bias_sigma_frac));
+    const double sb_px =
+        std::max(0.2, static_cast<double>(cfg.meas_bias_sigma_px));
+    const double sb_fr =
+        std::max(0.02, static_cast<double>(cfg.meas_bias_sigma_frac));
     for (int i = 8; i < N; ++i) x(i, 0) = 0.0;
-    P(8, 8) = sb * sb;
-    P(9, 9) = sb * sb;
-    P(10, 10) = sf * sf;
-    P(11, 11) = sf * sf;
+    P(8, 8) = sb_px * sb_px;
+    P(9, 9) = sb_px * sb_px;
+    P(10, 10) = sb_fr * sb_fr;
+    P(11, 11) = sb_fr * sb_fr;
   }
 
   valid = true;
@@ -569,8 +574,7 @@ double TargetFilter::update(const TrackerMeas& m, const TrackerConfig& cfg,
   // attributes size residuals to the bias and range gets worse — so it keeps
   // the geometry-only measurement and the original R.
   const bool bias = use_meas_bias(cfg) && !unscented;
-  const Vec<M> z_geom = h_of(x, pm, false);
-  Mat<M, M> R = R_of(cfg, bias, z_geom(2, 0), z_geom(3, 0));
+  const Mat<M, M> R = R_of(cfg, m.box, bias);
 
   Vec<M> zhat;
   Mat<M, M> S;

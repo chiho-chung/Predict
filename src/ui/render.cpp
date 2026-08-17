@@ -277,10 +277,10 @@ bool Renderer::process_events(Simulation& sim) {
           sim.adjust_jitter_center(+1.0f);
           break;
         case '3':
-          sim.adjust_jitter_size(-0.01f);
+          sim.adjust_jitter_size(-0.02f);
           break;
         case '4':
-          sim.adjust_jitter_size(+0.01f);
+          sim.adjust_jitter_size(+0.02f);
           break;
         case '5':
           sim.adjust_detect_hz(-1.0f);

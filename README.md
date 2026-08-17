@@ -190,8 +190,8 @@ amplifies error faster than accepting the lag does. Prediction is not free.
 
 Shared by both drones: rectangular plate + 4 rotor disks, envelope
 **30 x 30 x 5 cm**. The bounding box is fitted to the projected mesh (plate
-corners + rotor rims), then centre jitter of a few **pixels** (typical 3–5 px) and size jitter of
-**±10% of the box** (detector-like scale error, not a fixed pixel count).
+corners + rotor rims), then centre jitter of a few **pixels** (typical 3–5 px)
+and size jitter of **±10% of the current box**.
 
 ## Gimbal
 
@@ -214,7 +214,7 @@ compare against the ideal gimbal.
 | `T` | Toggle **frame-timing jitter** (period / latency / stamp noise) |
 | `G` | Toggle ideal / servo gimbal |
 | `1` `2` | Center jitter -/+ 1 px |
-| `3` `4` | Size jitter -/+ 1% of box size |
+| `3` `4` | Size jitter -/+ 2% of box |
 | `5` `6` | Detector rate -/+ 1 Hz |
 | `7` `8` | **Delay (detector latency) -/+ 10 ms**, works in either window |
 | `9` `0` | Zoom out / in (1x–4x; FOV = 70° / zoom) |
@@ -276,14 +276,15 @@ Sensors, matching what the airframe can actually supply:
 
 - own velocity in the nav frame (never own position)
 - camera direction on the drone (body attitude + gimbal angles)
-- the detector's bounding box: centre (pixels) and size (±10% of box), jittered and late
+- the detector's bounding box: centre in pixels and size as ±10% of the box,
+  jittered and late
 
 From those, range, target velocity and target extent are *inferred*.
 
 ### State
 
 ```
-x = [ p_rel(3) | v_target(3) | width_m | height_m | u_px | v_px | w_frac | h_frac ]
+x = [ p_rel(3) | v_target(3) | width_m | height_m | centre_bias_px(2) | size_frac(2) ]   (12 states)
 ```
 
 `p_rel` is target-minus-camera, because own velocity is measurable but own
@@ -298,18 +299,21 @@ camera projection is the only nonlinear part, which is why EKF and UKF differ
 *only* in the update:
 
 ```
-u      = cu + fx * x_c / z_c          w_px = fx * width_m  / z_c * (1 + w_frac)
-v      = cv - fy * y_c / z_c          h_px = fy * height_m / z_c * (1 + h_frac)
+u      = cu + fx * x_c / z_c + b_u     w_px = fx * width_m  / z_c * (1 + b_w)
+v      = cv - fy * y_c / z_c + b_v     h_px = fy * height_m / z_c * (1 + b_h)
 ```
+
+`b_u`, `b_v` are additive pixels; `b_w`, `b_h` are fractions of the geometric
+box (the detector’s ±10% size jitter).
 
 Because the state is relative, the measurement needs the camera's *orientation*
 only — no absolute camera position appears anywhere.
 
 The last four states are a first-order Gauss-Markov model of the detector EMA
-(`b_{k+1} = ρ b_k + w`, ρ = 0.6 per 100 ms): centre in pixels, size as a
-fraction of the box (±10% detector jitter). They are used in the **EKF**
-update only: the same states in the UKF dump size residuals into the bias and
-range gets worse, so the UKF keeps a geometry-only measurement. A low-pass in
+(`b_{k+1} = ρ b_k + w`, ρ = 0.6 per 100 ms): two centre-pixel states and two
+size-fraction states. They are used in the **EKF** update only: the same states
+in the UKF dump size residuals into the bias and range gets worse, so the UKF
+keeps a geometry-only measurement. A low-pass in
 front of either filter is **not** a substitute — it colors the residuals
 further and adds lag. Measured (EKF, 30 s, smooth target):
 
@@ -436,9 +440,10 @@ Reproduce any of the tables with `tools\check.bat` (headless, no window needed).
 
 ### Known limits
 
-- Detector jitter is correlated (EMA, `smooth = 0.6`). The EKF now models that
-  as a Gauss-Markov bias so the leftover innovation is white; the UKF still
-  treats `R` as white, which is slightly wrong on purpose.
+- Detector jitter is correlated (EMA, `smooth = 0.6`). Size jitter is ±10% of
+  the current box; the EKF models that as a Gauss-Markov fraction so the leftover
+  innovation is white. The UKF still treats `R` as white, which is slightly
+  wrong on purpose.
 - The `+H` box is reprojected through the *current* camera pose because the
   future pose is unknown.
 - The chase controller still steers on truth; only the gimbal and the estimator

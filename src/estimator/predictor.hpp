@@ -65,18 +65,19 @@ struct TrackerMeas {
 
 // One manoeuvre hypothesis.
 //
-// State (12): [ p_rel(3) | v_target(3) | width_m | height_m | bias(4) ]
+// State (12): [ p_rel(3) | v_target(3) | width_m | height_m |
+//               centre_bias_px(2) | size_frac(2) ]
 //
 // Relative position, because own velocity is measurable but own position is
 // not. Own velocity therefore enters as a known input and the dynamics stay
 // linear; the camera projection is the only nonlinear part, so EKF and UKF
 // differ solely in how the update is done.
 //
-// The last four states are a Gauss-Markov model of the detector's EMA jitter
-// (u, v in pixels; width/height as a fraction of predicted box size,
-// default ±10%). Pulling that correlation into the state leaves a white
-// innovation, which is what R, the gate and the IMM likelihood all assume.
-// They are measurement bias, not geometry: reprojection ignores them.
+// The last four states are a Gauss-Markov model of the detector's EMA jitter:
+// centre in pixels, size as a fraction of the geometric box. Pulling that
+// correlation into the state leaves a white innovation, which is what R, the
+// gate and the IMM likelihood all assume. They are measurement bias, not
+// geometry: reprojection ignores them.
 class TargetFilter {
  public:
   static constexpr int N = 12;

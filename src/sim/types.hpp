@@ -119,8 +119,8 @@ struct Detection {
 struct BBoxJitterConfig {
   bool enabled = true;
   float center_px = 4.0f;  // +/- pixels on bbox centre (u,v)
-  float size_frac = 0.10f;  // +/- fraction of width and height (±10%)
-  float smooth = 0.85f;    // 0=white noise, ~0.85=slow jitter
+  float size_frac = 0.10f; // +/- fraction of current width/height (±10%)
+  float smooth = 0.6f;     // 0=white noise; 0.6 matches meas_corr
 };
 
 struct PredictConfig {
@@ -168,9 +168,9 @@ struct TrackerConfig {
 
   // Detector noise, 1-sigma. This describes what the detector does, which a
   // designer can characterise; it is not read from the simulator's truth.
-  float sigma_px_center = 4.0f;   // origin filters: box centre, pixels
-  float sigma_size_frac = 0.10f;  // all bbox filters: width/height, fraction
-  float sigma_los_deg = 0.6f;     // export filters: heading/attack, degrees
+  float sigma_px_center = 4.0f;  // origin filters: 1-sigma on centre, pixels
+  float sigma_size_frac = 0.10f; // 1-sigma on width/height, fraction of box
+  float sigma_los_deg = 0.70f;   // export filters: 1-sigma heading/attack, deg
 
   // Own velocity is measured (NED), so its error drives relative position.
   float sigma_own_vel = 0.15f;
@@ -198,14 +198,14 @@ struct TrackerConfig {
   float imm_stay_prob = 0.93f;
 
   // Detector jitter is an EMA, not white. The filter models that as a
-  // first-order Gauss-Markov bias (centre in pixels, size as a fraction of
-  // box size) so the leftover innovation is white — which is what R and the
-  // gate assume. 0 disables the bias states. 0.6 matches the simulator's
-  // default EMA.
+  // first-order Gauss-Markov: centre bias in pixels (origin filters) and
+  // size bias as a fraction of the box. Leftover innovation is white —
+  // which is what R and the gate assume. 0 disables the bias states.
+  // 0.6 matches the simulator's default EMA.
   float meas_corr = 0.6f;
-  float meas_corr_tau_s = 0.10f;     // interval the coefficient is quoted over
-  float meas_bias_sigma_px = 2.0f;   // origin centre EMA 1-sigma, pixels
-  float meas_bias_sigma_frac = 0.05f;  // size EMA 1-sigma, fraction of box
+  float meas_corr_tau_s = 0.10f;       // interval the coefficient is quoted over
+  float meas_bias_sigma_px = 2.0f;     // origin centre GM 1-sigma, pixels
+  float meas_bias_sigma_frac = 0.10f;  // size GM 1-sigma, fraction of box
 
   // LOS-only filters cannot read angular size, so range starts from this prior
   // and is tightened only by own-motion parallax.

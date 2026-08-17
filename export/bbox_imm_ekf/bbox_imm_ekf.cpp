@@ -161,17 +161,13 @@ bool use_size_bias(const Config& cfg) { return cfg.meas_corr >= 0.05f; }
 bool use_los_bias(const Config& cfg) { return cfg.los_bias_sigma_deg >= 0.01f; }
 bool use_range_bias(const Config& cfg) { return cfg.range_bias_sigma_m >= 0.01f; }
 
-double los_sigma_rad(const Config& cfg) {
-  return std::max(0.05, static_cast<double>(cfg.sigma_los_deg)) * kDegToRad;
-}
-
-double size_sigma_px(float frac, double px) {
-  const double f = std::max(0.01, static_cast<double>(frac));
-  return std::max(0.4, f * std::max(2.0, px));
-}
-
 constexpr int kRngB = 12;  // range-bias state; size-frac bias is 10,11
-constexpr int kSizeBiasEnd = 12;
+
+double clamp_size_frac(double v) {
+  if (v > 0.8) return 0.8;
+  if (v < -0.8) return -0.8;
+  return v;
+}
 
 bool finite_state(const Vec<N>& x) {
   for (int i = 0; i < N; ++i) {
@@ -202,18 +198,18 @@ Vec<M> h_of(const Vec<N>& x, const Intr& cam, bool los_bias, bool size_bias,
   const double sw = std::max(kMinSize, x(6, 0));
   const double sh = std::max(kMinSize, x(7, 0));
   const double re = range_eff(x, rng_bias, known_rb);
+  const double wg = cam.fx * sw / re;
+  const double hg = cam.fy * sh / re;
+  const double bw = size_bias ? x(10, 0) : 0.0;
+  const double bh = size_bias ? x(11, 0) : 0.0;
   Vec<M> z;
   z(0, 0) = hdg;
   z(1, 0) = att;
-  z(2, 0) = cam.fx * sw / re;
-  z(3, 0) = cam.fy * sh / re;
+  z(2, 0) = wg * (1.0 + bw);
+  z(3, 0) = hg * (1.0 + bh);
   if (los_bias) {
     z(0, 0) += x(8, 0);
     z(1, 0) += x(9, 0);
-  }
-  if (size_bias) {
-    z(2, 0) *= (1.0 + x(10, 0));
-    z(3, 0) *= (1.0 + x(11, 0));
   }
   return z;
 }
@@ -231,10 +227,10 @@ Mat<M, N> H_of(const Vec<N>& x, const Intr& cam, bool los_bias, bool size_bias,
   const double re = range_eff(x, rng_bias, known_rb);
   const double inv_re2 = 1.0 / (re * re);
   const double dr_dpi = 1.0 / range;
-  const double geom_w = cam.fx * sw / re;
-  const double geom_h = cam.fy * sh / re;
-  const double fw = size_bias ? (1.0 + x(10, 0)) : 1.0;
-  const double fh = size_bias ? (1.0 + x(11, 0)) : 1.0;
+  const double scale_w = size_bias ? (1.0 + x(10, 0)) : 1.0;
+  const double scale_h = size_bias ? (1.0 + x(11, 0)) : 1.0;
+  const double wg = cam.fx * sw / re;
+  const double hg = cam.fy * sh / re;
 
   Mat<M, N> H;
   H(0, 0) = py / horiz2;
@@ -242,25 +238,25 @@ Mat<M, N> H_of(const Vec<N>& x, const Intr& cam, bool los_bias, bool size_bias,
   H(1, 0) = -pz * px / (r2 * horiz);
   H(1, 1) = -pz * py / (r2 * horiz);
   H(1, 2) = horiz / r2;
-  H(2, 0) = -cam.fx * sw * px * dr_dpi * inv_re2 * fw;
-  H(2, 1) = -cam.fx * sw * py * dr_dpi * inv_re2 * fw;
-  H(2, 2) = -cam.fx * sw * pz * dr_dpi * inv_re2 * fw;
-  H(3, 0) = -cam.fy * sh * px * dr_dpi * inv_re2 * fh;
-  H(3, 1) = -cam.fy * sh * py * dr_dpi * inv_re2 * fh;
-  H(3, 2) = -cam.fy * sh * pz * dr_dpi * inv_re2 * fh;
-  H(2, 6) = cam.fx / re * fw;
-  H(3, 7) = cam.fy / re * fh;
+  H(2, 0) = -cam.fx * sw * px * dr_dpi * inv_re2 * scale_w;
+  H(2, 1) = -cam.fx * sw * py * dr_dpi * inv_re2 * scale_w;
+  H(2, 2) = -cam.fx * sw * pz * dr_dpi * inv_re2 * scale_w;
+  H(3, 0) = -cam.fy * sh * px * dr_dpi * inv_re2 * scale_h;
+  H(3, 1) = -cam.fy * sh * py * dr_dpi * inv_re2 * scale_h;
+  H(3, 2) = -cam.fy * sh * pz * dr_dpi * inv_re2 * scale_h;
+  H(2, 6) = cam.fx / re * scale_w;
+  H(3, 7) = cam.fy / re * scale_h;
   if (los_bias) {
     H(0, 8) = 1.0;
     H(1, 9) = 1.0;
   }
   if (size_bias) {
-    H(2, 10) = geom_w;
-    H(3, 11) = geom_h;
+    H(2, 10) = wg;
+    H(3, 11) = hg;
   }
   if (rng_bias) {
-    H(2, kRngB) = -cam.fx * sw * inv_re2 * fw;
-    H(3, kRngB) = -cam.fy * sh * inv_re2 * fh;
+    H(2, kRngB) = -cam.fx * sw * inv_re2 * scale_w;
+    H(3, kRngB) = -cam.fy * sh * inv_re2 * scale_h;
   }
   return H;
 }
@@ -317,22 +313,23 @@ void predict_linear(Vec<N>& x, Mat<N, N>& P, double dt, const Vec3& own_vel,
     const double corr =
         std::min(0.98, std::max(0.01, static_cast<double>(cfg.meas_corr)));
     const double rho = std::exp(dt * std::log(corr) / tau);
-    const double sig_f =
-        std::max(0.001, static_cast<double>(cfg.meas_bias_sigma_frac));
-    for (int i = 10; i < kSizeBiasEnd; ++i) {
+    const double sig =
+        std::max(0.02, static_cast<double>(cfg.meas_bias_sigma_frac));
+    for (int i = 10; i < 12; ++i) {
       x(i, 0) *= rho;
-      for (int j = 0; j < 10; ++j) {
+      for (int j = 0; j < N; ++j) {
+        if (j == 10 || j == 11) continue;
         P(i, j) *= rho;
         P(j, i) *= rho;
       }
-      P(i, kRngB) *= rho;
-      P(kRngB, i) *= rho;
     }
-    for (int i = 10; i < kSizeBiasEnd; ++i) {
-      for (int j = 10; j < kSizeBiasEnd; ++j) P(i, j) *= rho * rho;
-    }
-    P(10, 10) += (1.0 - rho * rho) * sig_f * sig_f;
-    P(11, 11) += (1.0 - rho * rho) * sig_f * sig_f;
+    P(10, 10) *= rho * rho;
+    P(11, 11) *= rho * rho;
+    P(10, 11) *= rho * rho;
+    P(11, 10) *= rho * rho;
+    const double q = (1.0 - rho * rho) * sig * sig;
+    P(10, 10) += q;
+    P(11, 11) += q;
   }
 
   if (use_range_bias(cfg)) {
@@ -363,7 +360,9 @@ void init_state(const Meas& m, const Config& cfg, Vec<N>& x, Mat<N, N>& P) {
   if (e1.length() < 1e-3f) e1 = dir.cross(Vec3{1, 0, 0});
   e1 = e1.normalized();
   const Vec3 e2 = dir.cross(e1).normalized();
-  const double sig_perp = range * los_sigma_rad(cfg);
+  const double sig_ang =
+      std::max(0.05, static_cast<double>(cfg.sigma_los_deg)) * kDegToRad;
+  const double sig_perp = range * sig_ang;
   double sig_along = 0.5 * range;
   if (use_range_bias(cfg)) {
     // First-catch box error is mostly along LOS. Leave that door open so the
@@ -391,7 +390,7 @@ void init_state(const Meas& m, const Config& cfg, Vec<N>& x, Mat<N, N>& P) {
   }
   if (use_size_bias(cfg)) {
     const double sb =
-        std::max(0.001, static_cast<double>(cfg.meas_bias_sigma_frac));
+        std::max(0.02, static_cast<double>(cfg.meas_bias_sigma_frac));
     P(10, 10) = sb * sb;
     P(11, 11) = sb * sb;
   }
@@ -453,14 +452,21 @@ int ekf_update(Vec<N>& x, Mat<N, N>& P, const Meas& m, const Config& cfg,
   z(2, 0) = std::max(2.0, static_cast<double>(m.width_px));
   z(3, 0) = std::max(2.0, static_cast<double>(m.height_px));
 
-  const Vec<M> z_geom = h_of(x, cam, false, false, rng_b, known_rb);
-  double leftover = 1.0;
-  if (size_b) leftover = std::max(0.2, 1.0 - static_cast<double>(cfg.meas_corr));
-  const double sig_ang = los_sigma_rad(cfg);
-  const double ss_w =
-      std::max(0.4, size_sigma_px(cfg.sigma_size_frac, z_geom(2, 0)) * leftover);
-  const double ss_h =
-      std::max(0.4, size_sigma_px(cfg.sigma_size_frac, z_geom(3, 0)) * leftover);
+  double sig_ang =
+      std::max(0.05, static_cast<double>(cfg.sigma_los_deg)) * kDegToRad;
+  double ss_w = static_cast<double>(cfg.sigma_size_frac) * z(2, 0);
+  double ss_h = static_cast<double>(cfg.sigma_size_frac) * z(3, 0);
+  if (los_b) {
+    const double leftover = 1.0 - static_cast<double>(cfg.meas_corr);
+    sig_ang = std::max(0.02 * kDegToRad, sig_ang * leftover);
+  }
+  if (size_b) {
+    const double leftover = 1.0 - static_cast<double>(cfg.meas_corr);
+    ss_w *= leftover;
+    ss_h *= leftover;
+  }
+  ss_w = std::max(1.0, ss_w);
+  ss_h = std::max(1.0, ss_h);
   Mat<M, M> R;
   R(0, 0) = sig_ang * sig_ang;
   R(1, 1) = sig_ang * sig_ang;
@@ -491,8 +497,8 @@ int ekf_update(Vec<N>& x, Mat<N, N>& P, const Meas& m, const Config& cfg,
   P = symmetrize<N>(P - K * transpose(C));
   x(6, 0) = std::max(kMinSize, x(6, 0));
   x(7, 0) = std::max(kMinSize, x(7, 0));
-  x(10, 0) = std::max(-0.85, std::min(2.0, x(10, 0)));
-  x(11, 0) = std::max(-0.85, std::min(2.0, x(11, 0)));
+  x(10, 0) = clamp_size_frac(x(10, 0));
+  x(11, 0) = clamp_size_frac(x(11, 0));
   return 1;
 }
 
