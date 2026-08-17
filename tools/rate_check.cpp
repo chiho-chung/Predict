@@ -258,7 +258,6 @@ void validate_imm() {
   for (const Case& c : cases) {
     TrackerConfig tc;
     tc.sigma_px_center = c.sigma_px;
-    tc.sigma_px_size = c.sigma_px;
     tc.imm_sigma_accel[0] = 1.5f;
     tc.imm_sigma_accel[1] = 5.0f;
     tc.imm_sigma_accel[2] = 12.0f;

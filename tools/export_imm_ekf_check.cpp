@@ -41,7 +41,7 @@ SimConfig base() {
   cfg.predict.horizon_s = 0.5f;
   cfg.jitter.enabled = true;
   cfg.jitter.center_px = 4.0f;
-  cfg.jitter.size_px = 4.0f;
+  cfg.jitter.size_frac = 0.10f;
   cfg.jitter.smooth = 0.6f;
   cfg.timing.enabled = true;
   cfg.gimbal.ideal = true;
@@ -74,10 +74,10 @@ void distort_box_range(bbox_imm_ekf::Meas& m, float inj_m) {
 }
 
 void run(const char* tag, TargetManeuver man, bool zoom_cycle, int steps,
-         const bbox_imm_ekf::Config& ekf_cfg, float size_px = 4.0f) {
+         const bbox_imm_ekf::Config& ekf_cfg, float size_frac = 0.10f) {
   SimConfig cfg = base();
   cfg.target.maneuver = man;
-  cfg.jitter.size_px = size_px;
+  cfg.jitter.size_frac = size_frac;
   cfg.zoom.auto_cycle = zoom_cycle;
   cfg.zoom.min_zoom = 1.0f;
   cfg.zoom.max_zoom = 3.0f;
@@ -292,9 +292,9 @@ int main() {
   run("zoom/off", TargetManeuver::Smooth, true, 2000, off);
   run("zoom/on", TargetManeuver::Smooth, true, 2000, on);
 
-  std::printf("\n--- first-catch stress  size jitter 8 px ---\n");
-  run("sz8/off", TargetManeuver::Smooth, false, 2000, off, 8.0f);
-  run("sz8/on", TargetManeuver::Smooth, false, 2000, on, 8.0f);
+  std::printf("\n--- first-catch stress  size jitter +/-20 percent ---\n");
+  run("sz20/off", TargetManeuver::Smooth, false, 2000, off, 0.20f);
+  run("sz20/on", TargetManeuver::Smooth, false, 2000, on, 0.20f);
 
   std::printf("\n--- first box only +2 m, later boxes clean ---\n");
   run_first_catch("raw", 2.0f, 0.0f);

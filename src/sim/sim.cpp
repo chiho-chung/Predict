@@ -85,8 +85,9 @@ void Simulation::adjust_jitter_center(float delta_px) {
   cfg_.jitter.center_px = clampf(cfg_.jitter.center_px + delta_px, 0.0f, 40.0f);
 }
 
-void Simulation::adjust_jitter_size(float delta_px) {
-  cfg_.jitter.size_px = clampf(cfg_.jitter.size_px + delta_px, 0.0f, 20.0f);
+void Simulation::adjust_jitter_size(float delta_frac) {
+  cfg_.jitter.size_frac =
+      clampf(cfg_.jitter.size_frac + delta_frac, 0.0f, 0.50f);
 }
 
 void Simulation::adjust_detect_hz(float delta_hz) {
@@ -275,21 +276,23 @@ Detection Simulation::apply_bbox_jitter(const Detection& clean) {
 
   const float a = clampf(cfg_.jitter.smooth, 0.0f, 0.99f);
   const float center_amp = cfg_.jitter.center_px;
-  const float size_amp = cfg_.jitter.size_px;  // pixels, not a percent of the box
+  const float size_amp = cfg_.jitter.size_frac;  // ± fraction of current size
+  const float w0 = std::max(2.0f, clean.box.width());
+  const float h0 = std::max(2.0f, clean.box.height());
 
   const float n_du = rand_signed(rng_) * center_amp;
   const float n_dv = rand_signed(rng_) * center_amp;
-  const float n_dw = rand_signed(rng_) * size_amp;
-  const float n_dh = rand_signed(rng_) * size_amp;
+  const float n_fw = rand_signed(rng_) * size_amp;
+  const float n_fh = rand_signed(rng_) * size_amp;
 
   jit_du_ = a * jit_du_ + (1.0f - a) * n_du;
   jit_dv_ = a * jit_dv_ + (1.0f - a) * n_dv;
-  jit_dw_ = a * jit_dw_ + (1.0f - a) * n_dw;
-  jit_dh_ = a * jit_dh_ + (1.0f - a) * n_dh;
+  jit_dw_ = a * jit_dw_ + (1.0f - a) * n_fw;
+  jit_dh_ = a * jit_dh_ + (1.0f - a) * n_fh;
 
   const Vec2 c = clean.box.center();
-  const float w = std::max(2.0f, clean.box.width() + jit_dw_);
-  const float h = std::max(2.0f, clean.box.height() + jit_dh_);
+  const float w = std::max(2.0f, w0 * (1.0f + jit_dw_));
+  const float h = std::max(2.0f, h0 * (1.0f + jit_dh_));
   const float cu = c.x + jit_du_;
   const float cv = c.y + jit_dv_;
 

@@ -21,7 +21,7 @@ class Simulation {
   void toggle_predict();
   void toggle_jitter();
   void adjust_jitter_center(float delta_px);
-  void adjust_jitter_size(float delta_px);
+  void adjust_jitter_size(float delta_frac);
   void adjust_detect_hz(float delta_hz);
   void adjust_detect_latency(float delta_s);
   void toggle_timing_jitter();

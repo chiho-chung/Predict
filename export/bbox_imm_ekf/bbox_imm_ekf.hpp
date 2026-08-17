@@ -61,8 +61,8 @@ struct Camera {
 };
 
 struct Config {
-  float sigma_px_center = 4.0f;
-  float sigma_px_size = 4.0f;
+  float sigma_los_deg = 0.6f;     // heading/attack 1-sigma (deg), not box px
+  float sigma_size_frac = 0.10f;  // width/height 1-sigma, fraction of size
   float sigma_own_vel = 0.15f;
   float size_prior_m = 0.36f;
   float size_prior_sigma_m = 0.12f;
@@ -72,7 +72,7 @@ struct Config {
   float sigma_accel = 8.0f;
   float meas_corr = 0.6f;
   float meas_corr_tau_s = 0.10f;
-  float meas_bias_sigma_px = 2.0f;
+  float meas_bias_sigma_frac = 0.05f;
   float los_bias_sigma_deg = 0.0f;
   float los_bias_walk_deg = 0.02f;
   float range_bias_sigma_m = 0.0f;

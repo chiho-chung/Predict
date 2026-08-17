@@ -87,8 +87,8 @@ Defaults are the sim’s EKF:
 
 ```cpp
 bbox_ekf::Config cfg;
-cfg.sigma_px_center = 4.0f;   // LOS noise, pixels (converted to angle via fx)
-cfg.sigma_px_size   = 4.0f;   // box width/height noise, pixels — not a percent
+cfg.sigma_los_deg   = 0.6f;   // LOS noise, degrees (independent of fx / zoom)
+cfg.sigma_size_frac = 0.10f;  // box width/height noise, fraction of size (±10%)
 cfg.size_prior_m    = 0.36f;  // metres of target that span the box
 cfg.sigma_accel     = 8.0f;   // raise if the target jinks hard
 cfg.meas_corr       = 0.6f;   // 0 = disable size-bias whitening
@@ -100,6 +100,8 @@ ekf.set_config(cfg);
 ```
 
 If the target is not ~30 cm, set `size_prior_m` to the width that actually fills the box.
+
+LOS measurement noise is `sigma_los_deg` (radians in `R`). Box-centre pixels are not an input. Size noise is `sigma_size_frac` of the predicted width/height, matching ±10% detector jitter.
 
 ## LOS bias modes
 

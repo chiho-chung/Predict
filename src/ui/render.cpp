@@ -277,10 +277,10 @@ bool Renderer::process_events(Simulation& sim) {
           sim.adjust_jitter_center(+1.0f);
           break;
         case '3':
-          sim.adjust_jitter_size(-1.0f);
+          sim.adjust_jitter_size(-0.01f);
           break;
         case '4':
-          sim.adjust_jitter_size(+1.0f);
+          sim.adjust_jitter_size(+0.01f);
           break;
         case '5':
           sim.adjust_detect_hz(-1.0f);
@@ -817,8 +817,8 @@ void Renderer::render_hud(const SimSnapshot& snap, const SimConfig& cfg) {
   std::snprintf(line, sizeof(line), "J    jitter  %s  ctr 1/2  size 3/4",
                 cfg.jitter.enabled ? "ON" : "off");
   add(line);
-  std::snprintf(line, sizeof(line), "     ctr+/-%.0fpx  sz+/-%.0fpx",
-                cfg.jitter.center_px, cfg.jitter.size_px);
+  std::snprintf(line, sizeof(line), "     ctr+/-%.0fpx  sz+/-%.0f%%",
+                cfg.jitter.center_px, cfg.jitter.size_frac * 100.0f);
   add(line);
   std::snprintf(line, sizeof(line), "T    timing  %s",
                 cfg.timing.enabled ? "ON" : "off");

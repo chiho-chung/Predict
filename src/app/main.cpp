@@ -35,7 +35,7 @@ int run_manual() {
 
   cfg.jitter.enabled = true;
   cfg.jitter.center_px = 4.0f;
-  cfg.jitter.size_px = 4.0f;
+  cfg.jitter.size_frac = 0.10f;
   cfg.jitter.smooth = 0.6f;
 
   cfg.chase_enabled = true;

@@ -190,8 +190,8 @@ amplifies error faster than accepting the lag does. Prediction is not free.
 
 Shared by both drones: rectangular plate + 4 rotor disks, envelope
 **30 x 30 x 5 cm**. The bounding box is fitted to the projected mesh (plate
-corners + rotor rims), then centre and size jitter of a few **pixels** (typical
-3–5 px, not a percent of the box) is added to imitate a detector.
+corners + rotor rims), then centre jitter of a few **pixels** (typical 3–5 px) and size jitter of
+**±10% of the box** (detector-like scale error, not a fixed pixel count).
 
 ## Gimbal
 
@@ -214,7 +214,7 @@ compare against the ideal gimbal.
 | `T` | Toggle **frame-timing jitter** (period / latency / stamp noise) |
 | `G` | Toggle ideal / servo gimbal |
 | `1` `2` | Center jitter -/+ 1 px |
-| `3` `4` | Size jitter -/+ 1 px (not a percent) |
+| `3` `4` | Size jitter -/+ 1% of box size |
 | `5` `6` | Detector rate -/+ 1 Hz |
 | `7` `8` | **Delay (detector latency) -/+ 10 ms**, works in either window |
 | `9` `0` | Zoom out / in (1x–4x; FOV = 70° / zoom) |
@@ -283,7 +283,7 @@ From those, range, target velocity and target extent are *inferred*.
 ### State
 
 ```
-x = [ p_rel(3) | v_target(3) | width_m | height_m | bias_px(4) ]   (12 states)
+x = [ p_rel(3) | v_target(3) | width_m | height_m | u_px | v_px | w_frac | h_frac ]
 ```
 
 `p_rel` is target-minus-camera, because own velocity is measurable but own
@@ -298,15 +298,16 @@ camera projection is the only nonlinear part, which is why EKF and UKF differ
 *only* in the update:
 
 ```
-u      = cu + fx * x_c / z_c          w_px = fx * width_m  / z_c
-v      = cv - fy * y_c / z_c          h_px = fy * height_m / z_c
+u      = cu + fx * x_c / z_c          w_px = fx * width_m  / z_c * (1 + w_frac)
+v      = cv - fy * y_c / z_c          h_px = fy * height_m / z_c * (1 + h_frac)
 ```
 
 Because the state is relative, the measurement needs the camera's *orientation*
 only — no absolute camera position appears anywhere.
 
 The last four states are a first-order Gauss-Markov model of the detector EMA
-(`b_{k+1} = ρ b_k + w`, ρ = 0.6 per 100 ms). They are used in the **EKF**
+(`b_{k+1} = ρ b_k + w`, ρ = 0.6 per 100 ms): centre in pixels, size as a
+fraction of the box (±10% detector jitter). They are used in the **EKF**
 update only: the same states in the UKF dump size residuals into the bias and
 range gets worse, so the UKF keeps a geometry-only measurement. A low-pass in
 front of either filter is **not** a substitute — it colors the residuals

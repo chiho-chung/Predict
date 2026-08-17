@@ -80,7 +80,7 @@ struct Scenario {
   float latency_s;
   bool jitter;
   float center_px;
-  float size_px;
+  float size_frac;
   Vec3 drone_pos;
   Vec3 target_pos;
   Vec3 target_vel;
@@ -149,7 +149,7 @@ SimConfig make_base() {
   cfg.predict.horizon_s = 0.5f;
   cfg.jitter.enabled = true;
   cfg.jitter.center_px = 4.0f;
-  cfg.jitter.size_px = 4.0f;
+  cfg.jitter.size_frac = 0.10f;
   cfg.jitter.smooth = 0.6f;
   cfg.timing.enabled = true;
   cfg.timing.period_jitter_frac = 0.20f;
@@ -176,36 +176,36 @@ std::vector<Scenario> make_scenarios(bool quick) {
 
   std::vector<Scenario> s = {
       {"s01", "smooth_10hz_50ms", TargetManeuver::Smooth, 10, 0.05f, true, 4,
-       4.0f, d0, t0, v0, 0xC0FFEEu},
-      {"s02", "jink_10hz_50ms", TargetManeuver::Jink, 10, 0.05f, true, 4, 4.0f,
+       0.10f, d0, t0, v0, 0xC0FFEEu},
+      {"s02", "jink_10hz_50ms", TargetManeuver::Jink, 10, 0.05f, true, 4, 0.10f,
        d0, t0, v0, 0xC0FFEEu},
       {"s03", "smooth_10hz_150ms", TargetManeuver::Smooth, 10, 0.15f, true, 4,
-       4.0f, d0, t0, v0, 0xC0FFEEu},
-      {"s04", "jink_10hz_150ms", TargetManeuver::Jink, 10, 0.15f, true, 4, 4.0f,
+       0.10f, d0, t0, v0, 0xC0FFEEu},
+      {"s04", "jink_10hz_150ms", TargetManeuver::Jink, 10, 0.15f, true, 4, 0.10f,
        d0, t0, v0, 0xC0FFEEu},
       {"s05", "smooth_20hz_50ms", TargetManeuver::Smooth, 20, 0.05f, true, 4,
-       4.0f, d0, t0, v0, 0xC0FFEEu},
-      {"s06", "jink_4hz_50ms", TargetManeuver::Jink, 4, 0.05f, true, 4, 4.0f, d0,
+       0.10f, d0, t0, v0, 0xC0FFEEu},
+      {"s06", "jink_4hz_50ms", TargetManeuver::Jink, 4, 0.05f, true, 4, 0.10f, d0,
        t0, v0, 0xC0FFEEu},
       {"s07", "smooth_10hz_nojitter", TargetManeuver::Smooth, 10, 0.05f, false, 4,
-       4.0f, d0, t0, v0, 0xC0FFEEu},
+       0.10f, d0, t0, v0, 0xC0FFEEu},
       {"s08", "jink_10hz_nojitter", TargetManeuver::Jink, 10, 0.05f, false, 4,
-       4.0f, d0, t0, v0, 0xC0FFEEu},
-      {"s09", "far_smooth", TargetManeuver::Smooth, 10, 0.05f, true, 4, 4.0f,
+       0.10f, d0, t0, v0, 0xC0FFEEu},
+      {"s09", "far_smooth", TargetManeuver::Smooth, 10, 0.05f, true, 4, 0.10f,
        d_far, t_far, v_far, 0xA11CEu},
-      {"s10", "close_jink", TargetManeuver::Jink, 10, 0.05f, true, 4, 4.0f,
+      {"s10", "close_jink", TargetManeuver::Jink, 10, 0.05f, true, 4, 0.10f,
        d_near, t_near, v_near, 0xBEEFu},
-      {"s11", "seed2_smooth", TargetManeuver::Smooth, 10, 0.05f, true, 4, 4.0f,
+      {"s11", "seed2_smooth", TargetManeuver::Smooth, 10, 0.05f, true, 4, 0.10f,
        d0, t0, v_alt, 0xCAFEu},
-      {"s12", "hi_jitter_jink", TargetManeuver::Jink, 10, 0.05f, true, 8, 8.0f,
+      {"s12", "hi_jitter_jink", TargetManeuver::Jink, 10, 0.05f, true, 8, 0.20f,
        d0, t0, v0, 0xC0FFEEu},
-      {"s13", "stable_timing", TargetManeuver::Smooth, 10, 0.05f, true, 4, 4.0f,
+      {"s13", "stable_timing", TargetManeuver::Smooth, 10, 0.05f, true, 4, 0.10f,
        d0, t0, v0, 0xC0FFEEu, false, 0.0f, 0.0f, 0.0f},
-      {"s14", "heavy_period", TargetManeuver::Smooth, 10, 0.05f, true, 4, 4.0f,
+      {"s14", "heavy_period", TargetManeuver::Smooth, 10, 0.05f, true, 4, 0.10f,
        d0, t0, v0, 0xC0FFEEu, true, 0.40f, 0.010f, 0.002f},
-      {"s15", "heavy_stamp", TargetManeuver::Jink, 10, 0.05f, true, 4, 4.0f, d0,
+      {"s15", "heavy_stamp", TargetManeuver::Jink, 10, 0.05f, true, 4, 0.10f, d0,
        t0, v0, 0xC0FFEEu, true, 0.20f, 0.015f, 0.008f},
-      {"s16", "zoom_1to3x", TargetManeuver::Smooth, 10, 0.05f, true, 4, 4.0f, d0,
+      {"s16", "zoom_1to3x", TargetManeuver::Smooth, 10, 0.05f, true, 4, 0.10f, d0,
        t0, v0, 0xC0FFEEu, true, 0.20f, 0.010f, 0.002f, true},
   };
   if (quick) s.resize(4);
@@ -219,7 +219,7 @@ SimConfig cfg_of(const Scenario& sc) {
   cfg.rates.detect_latency_s = sc.latency_s;
   cfg.jitter.enabled = sc.jitter;
   cfg.jitter.center_px = sc.center_px;
-  cfg.jitter.size_px = sc.size_px;
+  cfg.jitter.size_frac = sc.size_frac;
   cfg.spawn.drone_pos = sc.drone_pos;
   cfg.spawn.target_pos = sc.target_pos;
   cfg.spawn.target_vel = sc.target_vel;
@@ -345,7 +345,7 @@ int run_auto_bench(float seconds, bool quick) {
   }
 
   std::fprintf(sc_f,
-               "id,name,maneuver,detect_hz,latency_s,jitter,center_px,size_px,"
+               "id,name,maneuver,detect_hz,latency_s,jitter,center_px,size_frac,"
                "timing,period_jit,lat_jit_s,stamp_jit_s,"
                "drone_x,drone_y,drone_z,tgt_x,tgt_y,tgt_z,tgt_vx,tgt_vy,tgt_vz,"
                "seed,duration_s,ideal_gimbal\n");
@@ -379,7 +379,7 @@ int run_auto_bench(float seconds, bool quick) {
                  sc.id, sc.name,
                  sc.man == TargetManeuver::Jink ? "jink" : "smooth",
                  sc.detect_hz, sc.latency_s, sc.jitter ? 1 : 0, sc.center_px,
-                 sc.size_px, sc.timing ? 1 : 0, sc.period_jit, sc.lat_jit,
+                 sc.size_frac, sc.timing ? 1 : 0, sc.period_jit, sc.lat_jit,
                  sc.stamp_jit, sc.drone_pos.x, sc.drone_pos.y, sc.drone_pos.z,
                  sc.target_pos.x, sc.target_pos.y, sc.target_pos.z,
                  sc.target_vel.x, sc.target_vel.y, sc.target_vel.z, sc.seed,
