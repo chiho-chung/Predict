@@ -1,5 +1,6 @@
 #include "bench.hpp"
 #include "csv_log.hpp"
+#include "history.hpp"
 #include "plot.hpp"
 #include "predictor.hpp"
 #include "render.hpp"
@@ -48,6 +49,9 @@ int run_manual() {
   PlotWindow plot;
   plot.create_window("LOS angles + error vs origin + range");
 
+  HistoryWindow hist;
+  hist.create_window("History — experiment index + trace review");
+
   ExperimentLog exp;
   auto exp_label = [](const SimConfig& c) {
     char buf[80];
@@ -81,6 +85,7 @@ int run_manual() {
   while (renderer.process_events(sim)) {
     // The plot window has its own message queue, so its delay keys arrive here
     // rather than through the sim window.
+    if (renderer.take_history()) hist.show();
     if (const int steps_lat = plot.take_latency_steps()) {
       sim.adjust_detect_latency(0.01f * static_cast<float>(steps_lat));
     }
@@ -102,12 +107,14 @@ int run_manual() {
         exp.end();
         exp_cfg = now_cfg;
         exp.begin("live", exp_label(exp_cfg).c_str(), exp_cfg);
+        if (hist.alive()) hist.reload();
       }
       last_t = snap.time;
       exp.sample(now_cfg, snap);
       // Sampled per sim step, so the 10 Hz staircase is visible rather than
       // aliased by the render rate.
       plot.push(snap, now_cfg);
+      renderer.note_sample(snap);
       accumulator -= fixed_dt;
       ++steps;
     }
@@ -118,6 +125,10 @@ int run_manual() {
     if (plot.alive()) {
       plot.draw(sim.config());
       plot.present();
+    }
+    if (hist.alive()) {
+      hist.draw();
+      hist.present();
     }
     // Win32 Sleep, not std::this_thread: MinGW's static winpthread teardown
     // aborts on exit and the console reports 0xFFFFFFFF.
@@ -146,10 +157,15 @@ int main(int argc, char** argv) {
                std::strcmp(argv[i], "-h") == 0) {
       std::printf(
           "usage:\n"
-          "  drone_chase_sim.exe              manual (windows, same as before)\n"
+          "  drone_chase_sim.exe              manual (windows)\n"
           "  drone_chase_sim.exe auto         auto-bench, write logs/auto_*\n"
           "  drone_chase_sim.exe auto --quick shorter (4 scenarios, 8 s)\n"
-          "  drone_chase_sim.exe auto --seconds 30\n");
+          "  drone_chase_sim.exe auto --seconds 30\n"
+          "\n"
+          "manual windows:\n"
+          "  sim     camera + 3D + SETUP / ANALYSIS panel\n"
+          "  plot    LOS / error / range traces\n"
+          "  history experiment index (H). Up/Down, Enter load, F5 reload\n");
       return 0;
     }
   }

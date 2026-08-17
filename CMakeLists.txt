@@ -8,9 +8,11 @@ add_executable(drone_chase_sim
   src/main.cpp
   src/sim.cpp
   src/render.cpp
-      src/predictor.cpp
-      src/plot.cpp
-      src/csv_log.cpp
+  src/predictor.cpp
+  src/plot.cpp
+  src/csv_log.cpp
+  src/bench.cpp
+  src/history.cpp
 )
 
 target_include_directories(drone_chase_sim PRIVATE src)

@@ -32,21 +32,72 @@ struct HudLine {
   uint32_t color = kColText;
   bool swatch = false;
   bool swatch_filled = false;
+  bool section = false;
 };
 
 std::vector<HudLine> g_hud_lines;
 int g_hud_x = 0;
 
+struct RollAcc {
+  double sum_sq = 0;
+  int n = 0;
+  void reset() {
+    sum_sq = 0;
+    n = 0;
+  }
+  void add(double v) {
+    if (!std::isfinite(v)) return;
+    sum_sq += v * v;
+    ++n;
+  }
+  double rms() const { return n ? std::sqrt(sum_sq / n) : 0.0; }
+};
+
+struct LiveRms {
+  RollAcc est_px, held_px, los_h, los_a, range, size;
+  float last_t = -1.0f;
+  void feed(const SimSnapshot& snap) {
+    if (snap.time + 1e-4f < last_t) {
+      est_px.reset();
+      held_px.reset();
+      los_h.reset();
+      los_a.reset();
+      range.reset();
+      size.reset();
+    }
+    last_t = snap.time;
+    if (snap.time < 2.0f) return;
+    if (snap.detection.visible && snap.detection_gt.visible) {
+      est_px.add(snap.est_err_px);
+      held_px.add(snap.held_err_px);
+    }
+    if (snap.los.origin.valid && snap.los.estimate.valid) {
+      float dh = snap.los.estimate.heading_deg - snap.los.origin.heading_deg;
+      float da = snap.los.estimate.attack_deg - snap.los.origin.attack_deg;
+      while (dh > 180) dh -= 360;
+      while (dh < -180) dh += 360;
+      los_h.add(dh);
+      los_a.add(da);
+    }
+    if (snap.track_now.valid && snap.track_now.range_m > 0.1f) {
+      range.add(snap.track_now.range_m - snap.true_range_m);
+      size.add(snap.size_err_m);
+    }
+  }
+};
+
+LiveRms g_live;
+
 // Shared layout: swatches go in the framebuffer, text goes down via GDI, so both
 // need the same row geometry.
 constexpr int kGap = 8;
-constexpr int kPanelW = 300;
-constexpr int kMapSize = 200;
-constexpr int kHudTop = 240;
+constexpr int kPanelW = 328;
+constexpr int kMapSize = 196;
+constexpr int kHudTop = 228;
 constexpr int kHudStep = 15;
-constexpr int kHudMaxLines = 37;
-constexpr int kSwatchDx = 20;
-constexpr int kTextDx = 42;
+constexpr int kHudMaxLines = 38;
+constexpr int kSwatchDx = 12;
+constexpr int kTextDx = 36;
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
   if (msg == WM_NCCREATE) {
@@ -119,6 +170,8 @@ Renderer::Renderer(int cam_w, int cam_h) : cam_w_(cam_w), cam_h_(cam_h) {
   view_h_ = win_h_ - cam_h_ - 2 * kGap;
   pixels_.assign(static_cast<size_t>(win_w_) * static_cast<size_t>(win_h_), 0);
 }
+
+void Renderer::note_sample(const SimSnapshot& snap) { g_live.feed(snap); }
 
 Viewport Renderer::cam_vp() const { return Viewport{0, 0, cam_w_, cam_h_}; }
 
@@ -275,6 +328,9 @@ bool Renderer::process_events(Simulation& sim) {
           break;
         case VK_DOWN:
           sim.nudge_target({0, -2, 0});
+          break;
+        case 'H':
+          hist_req_ = true;
           break;
         default:
           break;
@@ -678,8 +734,8 @@ void Renderer::render_world_view(const SimSnapshot& snap, const SimConfig& cfg) 
 }
 
 void Renderer::render_minimap(const SimSnapshot& snap) {
-  const int ox = panel_x() + 20;
-  const int oy = 20;
+  const int ox = panel_x() + 12;
+  const int oy = 12;
   const int size = kMapSize;
   draw_rect(ox, oy, ox + size, oy + size, rgb(25, 25, 30), true);
   draw_rect(ox, oy, ox + size, oy + size, rgb(80, 80, 90), false);
@@ -721,104 +777,105 @@ void Renderer::render_hud(const SimSnapshot& snap, const SimConfig& cfg) {
   g_hud_x = px;
   draw_rect(px, 0, win_w_ - 1, win_h_ - 1, kColPanel, true);
   render_minimap(snap);
+  // live RMS is accumulated in note_sample() each sim step
 
-  char line[128];
+  char line[160];
   g_hud_lines.clear();
 
-  auto add = [&](const char* text) {
-    g_hud_lines.push_back(HudLine{text, kColText, false, false});
+  auto add = [&](const char* text, uint32_t color = kColText) {
+    g_hud_lines.push_back(HudLine{text, color, false, false, false});
   };
   auto add_legend = [&](const char* text, uint32_t color, bool filled) {
-    g_hud_lines.push_back(HudLine{text, color, true, filled});
+    g_hud_lines.push_back(HudLine{text, color, true, filled, false});
+  };
+  auto add_section = [&](const char* text) {
+    g_hud_lines.push_back(HudLine{text, kColEst, false, false, true});
   };
 
-  add_legend("measured box @10Hz (held)", kColBoxMeas, false);
-  add_legend("true box @100Hz", kColBoxTrue, false);
-  add_legend("estimate now @100Hz", kColBoxEst, false);
-  add_legend("predicted +H @100Hz", kColBoxPred, false);
-  add_legend("chaser drone", kColChaser, true);
-  add_legend("target drone", kColTarget, true);
-  add_legend("gimbal axis + FOV", kColLookRay, true);
-  add("");
+  add_legend("measured (held)", kColBoxMeas, false);
+  add_legend("true box", kColBoxTrue, false);
+  add_legend("estimate now", kColBoxEst, false);
+  add_legend("predicted +H", kColBoxPred, false);
 
-  std::snprintf(line, sizeof(line), "sim %.0fHz / detect %.0fHz +%.0fms lat",
-                cfg.rates.sim_hz, cfg.rates.detect_hz,
+  add_section("SETUP");
+  const char* meas_tag = !estimator_uses_filter(cfg.tracker.type)
+                             ? "px"
+                             : (estimator_uses_bbox(cfg.tracker.type) ? "bbox"
+                                                                     : "LOS");
+  std::snprintf(line, sizeof(line), "E/W  %s  %s",
+                estimator_name(cfg.tracker.type), meas_tag);
+  add(line, kColBoxEst);
+  std::snprintf(line, sizeof(line), "M    target  %s",
+                cfg.target.maneuver == TargetManeuver::Jink ? "JINK" : "smooth");
+  add(line);
+  std::snprintf(line, sizeof(line), "C    chase   %s",
+                cfg.chase_enabled ? "ON" : "off");
+  add(line);
+  std::snprintf(line, sizeof(line), "P    predict %s  H=%.1fs  (+/-)",
+                cfg.predict.enabled ? "ON" : "off", cfg.predict.horizon_s);
+  add(line);
+  std::snprintf(line, sizeof(line), "J    jitter  %s  ctr 1/2  size 3/4",
+                cfg.jitter.enabled ? "ON" : "off");
+  add(line);
+  std::snprintf(line, sizeof(line), "     ctr+/-%.0fpx  sz+/-%.0fpx",
+                cfg.jitter.center_px, cfg.jitter.size_px);
+  add(line);
+  std::snprintf(line, sizeof(line), "T    timing  %s",
+                cfg.timing.enabled ? "ON" : "off");
+  add(line);
+  std::snprintf(line, sizeof(line), "G    gimbal  %s",
+                cfg.gimbal.ideal ? "IDEAL" : "servo");
+  add(line);
+  std::snprintf(line, sizeof(line), "5/6  detect  %.0f Hz", cfg.rates.detect_hz);
+  add(line);
+  std::snprintf(line, sizeof(line), "7/8  delay   %.0f ms",
                 cfg.rates.detect_latency_s * 1000.0f);
   add(line);
-  std::snprintf(line, sizeof(line), "zoom %.2fx  FOV %.0fdeg  fx %.0f",
+  std::snprintf(line, sizeof(line), "9/0  zoom    %.2fx  FOV %.0f  fx %.0f",
                 snap.zoom, snap.fov_deg, snap.fx);
+  add(line);
+  add("H    history  (review logs)");
+  add("R reset   Esc quit");
+
+  add_section("ANALYSIS");
+  std::snprintf(line, sizeof(line), "t=%.1fs  det #%d  age=%.0fms  upd %d rej %d",
+                snap.time, snap.detect_count, snap.detection_age * 1000.0f,
+                snap.tracker_updates, snap.tracker_rejects);
   add(line);
   if (cfg.timing.enabled) {
     const float inst_hz =
         snap.last_period_s > 1e-4f ? 1.0f / snap.last_period_s : 0.0f;
-    std::snprintf(line, sizeof(line),
-                  "timing ON  inst %.1fHz  lat %.0fms  stamp%+.1fms", inst_hz,
-                  snap.last_latency_s * 1000.0f, snap.stamp_err_s * 1000.0f);
+    std::snprintf(line, sizeof(line), "inst %.1fHz  lat %.0fms  stamp%+.1fms",
+                  inst_hz, snap.last_latency_s * 1000.0f,
+                  snap.stamp_err_s * 1000.0f);
+    add(line);
   } else {
-    std::snprintf(line, sizeof(line), "timing OFF  stable %.0fHz",
+    std::snprintf(line, sizeof(line), "timing off  stable %.0fHz",
                   cfg.rates.detect_hz);
+    add(line);
   }
+  std::snprintf(line, sizeof(line), "range true %.1f m   chaser %.1f  tgt %.1f m/s",
+                snap.true_range_m, snap.drone.vel.length(),
+                snap.target.vel.length());
   add(line);
-  std::snprintf(line, sizeof(line), "t=%.1fs  det #%d  age=%.0fms", snap.time,
-                snap.detect_count, snap.detection_age * 1000.0f);
-  add(line);
-  std::snprintf(line, sizeof(line), "chaser %.1f m/s  target %.1f m/s",
-                snap.drone.vel.length(), snap.target.vel.length());
-  add(line);
-  std::snprintf(line, sizeof(line), "range=%.1f m  depth=%.1f m",
-                (snap.target.pos - snap.drone.pos).length(),
-                snap.detection.depth);
-  add(line);
-
   if (snap.detection.visible) {
-    std::snprintf(line, sizeof(line), "box %.0fx%.0f px",
-                  snap.detection.box.width(), snap.detection.box.height());
-    add(line);
-    std::snprintf(line, sizeof(line), "px vel (%.0f,%.0f)/s", snap.box_vel_px.x,
-                  snap.box_vel_px.y);
-    add(line);
+    std::snprintf(line, sizeof(line), "box %.0fx%.0f px   held %.1f  est %.1f  off %.0f",
+                  snap.detection.box.width(), snap.detection.box.height(),
+                  snap.held_err_px, snap.est_err_px, snap.track_err_px);
+    add(line, kColBoxMeas);
   } else {
-    add("box: lost");
-    add("");
+    add("box: lost", kColTarget);
   }
-
-  add("");
-  std::snprintf(line, sizeof(line), "err held  = %.1f px", snap.held_err_px);
-  g_hud_lines.push_back(HudLine{line, kColBoxMeas, false, false});
-  std::snprintf(line, sizeof(line), "err estim = %.1f px", snap.est_err_px);
-  g_hud_lines.push_back(HudLine{line, kColBoxEst, false, false});
-  std::snprintf(line, sizeof(line), "off-center= %.0f px", snap.track_err_px);
-  add(line);
-  std::snprintf(line, sizeof(line), "gimbal %s %.0f deg/s",
-                cfg.gimbal.ideal ? "IDEAL" : "servo", snap.gimbal_rate_dps);
-  add(line);
-
-  // Estimator block: what the filter recovers that the image-space baseline
-  // cannot, plus the truth beside it.
-  add("");
-  const char* meas_tag = !estimator_uses_filter(cfg.tracker.type)
-                             ? "px"
-                             : (estimator_uses_bbox(cfg.tracker.type) ? "bbox"
-                                                                     : "LOS-only");
-  std::snprintf(line, sizeof(line), "estimator %s  %s  %s  upd %d rej %d",
-                estimator_name(cfg.tracker.type), meas_tag,
-                (cfg.tracker.meas_corr >= 0.05f &&
-                 estimator_uses_filter(cfg.tracker.type) &&
-                 !estimator_is_unscented(cfg.tracker.type))
-                    ? "whiten"
-                    : "raw R",
-                snap.tracker_updates, snap.tracker_rejects);
-  g_hud_lines.push_back(HudLine{line, kColBoxEst, false, false});
   if (snap.track_now.valid && snap.track_now.range_m > 0) {
-    std::snprintf(line, sizeof(line), "range %.1f +/-%.1f m (true %.1f)",
+    std::snprintf(line, sizeof(line), "est range %.1f +/-%.1f m  (err %.2f)",
                   snap.track_now.range_m, snap.track_now.range_sigma_m,
-                  snap.true_range_m);
-    add(line);
-    std::snprintf(line, sizeof(line), "extent %.2f x %.2f m (err %.2f)",
+                  snap.range_err_m);
+    add(line, kColBoxEst);
+    std::snprintf(line, sizeof(line), "extent %.2fx%.2f m  (err %.2f)",
                   snap.track_now.size_w_m, snap.track_now.size_h_m,
                   snap.size_err_m);
     add(line);
-    std::snprintf(line, sizeof(line), "tgt speed %.1f m/s (true %.1f)",
+    std::snprintf(line, sizeof(line), "tgt speed %.1f m/s  (true %.1f)",
                   snap.track_now.speed_mps, snap.target.vel.length());
     add(line);
     if (snap.track_now.model_count > 1) {
@@ -826,43 +883,31 @@ void Renderer::render_hud(const SimSnapshot& snap, const SimConfig& cfg) {
                     snap.track_now.model_prob[0], snap.track_now.model_prob[1],
                     snap.track_now.model_prob[2]);
       add(line);
-    } else {
-      add("single model");
     }
   } else {
-    add("range: image-space only");
-    add("extent: n/a");
-    add("tgt speed: n/a");
-    add("");
+    add("filter: image-space only (no range/size)");
   }
-  add("");
-
-  std::snprintf(line, sizeof(line), "jitter %s ctr+/-%.0fpx sz+/-%.0fpx",
-                cfg.jitter.enabled ? "ON" : "OFF", cfg.jitter.center_px,
-                cfg.jitter.size_px);
+  add("this-run RMS after 2s:", rgb(170, 170, 180));
+  std::snprintf(line, sizeof(line), "px held %.2f  est %.2f", g_live.held_px.rms(),
+                g_live.est_px.rms());
+  add(line, kColBoxEst);
+  std::snprintf(line, sizeof(line), "LOS hdg %.3f deg   att %.3f deg",
+                g_live.los_h.rms(), g_live.los_a.rms());
   add(line);
-  std::snprintf(line, sizeof(line), "predict %s  H=%.1fs",
-                cfg.predict.enabled ? "ON" : "OFF", cfg.predict.horizon_s);
-  add(line);
-  std::snprintf(line, sizeof(line), "chase %s  target %s",
-                cfg.chase_enabled ? "ON" : "OFF",
-                cfg.target.maneuver == TargetManeuver::Jink ? "JINK" : "smooth");
-  add(line);
-  add("");
-  add("E/W estimator (bbox + LOS-only)");
-  add("M target motion   T frame timing");
-  add("C chase  P predict  J jitter");
-  add("G gimbal  1/2 ctr  3/4 size");
-  add("5/6 detHz  7/8 latency  9/0 zoom");
-  add("+/- H");
-  add("R reset  Esc quit");
+  std::snprintf(line, sizeof(line), "range %.2f m   size %.3f m",
+                g_live.range.rms(), g_live.size.rms());
+  add(line, kColBoxPred);
 
   const int sx = px + kSwatchDx;
   for (size_t i = 0; i < g_hud_lines.size(); ++i) {
     const HudLine& hl = g_hud_lines[i];
+    const int y = kHudTop + static_cast<int>(i) * kHudStep;
+    if (hl.section) {
+      draw_rect(px + 4, y - 1, win_w_ - 5, y + kHudStep - 3, rgb(28, 36, 32),
+                true);
+    }
     if (!hl.swatch) continue;
-    const int y = kHudTop + static_cast<int>(i) * kHudStep + 3;
-    draw_rect(sx, y, sx + 12, y + 9, hl.color, hl.swatch_filled);
+    draw_rect(sx, y + 3, sx + 12, y + 12, hl.color, hl.swatch_filled);
   }
 }
 

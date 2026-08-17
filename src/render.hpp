@@ -30,6 +30,13 @@ class Renderer {
   void on_destroyed() { hwnd_ = nullptr; }
   void blit_to(void* hdc) const;  // HDC, kept untyped so the header stays free of windows.h
 
+  bool take_history() {
+    const bool v = hist_req_;
+    hist_req_ = false;
+    return v;
+  }
+  void note_sample(const SimSnapshot& snap);
+
  private:
   Surface surface();
   void clear(uint32_t color);
@@ -75,6 +82,7 @@ class Renderer {
   int win_w_ = 960;
   int win_h_ = 660;
   std::vector<uint32_t> pixels_;
+  bool hist_req_ = false;
 
   void* hwnd_ = nullptr;  // HWND without including windows.h here
   void* hdc_mem_ = nullptr;

@@ -95,6 +95,12 @@ Press `T` to turn timing jitter off and recover a stable 10 Hz for comparison.
   visible from tens of meters back. Shows gimbal axis, camera FOV edges,
   altitude drop lines and line of sight.
 - **Minimap** (panel) — top-down, centered on the chaser, 40 m across.
+- **SETUP** (panel) — estimator, motion, chase, predict, jitter, timing,
+  gimbal, detect rate, delay, zoom. Keys are listed next to the values.
+- **ANALYSIS** (panel) — live box/range/size errors plus this-run RMS after 2 s.
+- **History** (third window, `H`) — `logs/experiments.csv` index. Arrow keys
+  pick a run, Enter loads its timeseries, F5 reloads the index. Closing it does
+  not close the sim.
 
 ## LOS angle plots (second window)
 
@@ -213,10 +219,12 @@ compare against the ideal gimbal.
 | `7` `8` | **Delay (detector latency) -/+ 10 ms**, works in either window |
 | `9` `0` | Zoom out / in (1x–4x; FOV = 70° / zoom) |
 | `+` `-` | Predict horizon +/- 0.1 s |
-| Arrows | Nudge target |
-| `R` | Reset |
+| `H` | Open / raise the **history** window (review past experiments) |
+| Arrows | Nudge target (sim). In history: move selection |
+| `R` | Reset sim. In history: reload the index |
 | `Esc` | Quit |
 | `F1`-`F5` | Show/hide a trace and its error trace (plot window) |
+| `F5` / Enter | History: reload index / load selected timeseries |
 
 ## Estimator
 
