@@ -1,0 +1,33 @@
+---
+description: Clean C++ structure and test or bench every new feature.
+alwaysApply: true
+---
+
+# Style and verification
+
+Match existing C++17 style: small types, no extra dependencies, real names, no
+commented-out code. Touch only files the task needs. Keep `export/bbox_ekf/`
+standalone (hpp + cpp + its README; no sim headers, no Eigen).
+
+## Structure
+
+- Estimators: `src/predictor.*`. Export copy: `export/bbox_ekf/`.
+- Sim / GUI: `src/sim.*`, `src/render.*`, `src/history.*`. Headless: `src/bench.*`.
+- Checks: `tools/*_check.cpp`, `tools/check.bat`. Build: `build.bat` → `build/`.
+
+Prefer extending a type or function over a parallel ad-hoc path. Update
+`export/bbox_ekf/README.md` when the export API or defaults change.
+
+## Test / bench every feature
+
+Do not ship a behaviour change unmeasured. Add or extend a check, run it, report
+the numbers in the reply (and in the commit body if they change defaults).
+
+| Kind of change | Preferred check |
+|---|---|
+| Export EKF / LOS / range | `tools/export_ekf_check.cpp` → `build/export_ekf_check.exe` |
+| Sim estimator / timing | `tools/check.bat` or `build\drone_chase_sim.exe auto --quick` |
+| Focal feature (range, size, LOS) | Score that quantity; include off vs on when adding a knob |
+
+If a default would regress the quiet/smooth case, leave it off and document
+when to enable it. Do not invent prices, URLs, or metrics you did not run.

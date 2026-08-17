@@ -1,0 +1,31 @@
+---
+description: Auto-commit each completed step in this repo with a why-focused message.
+alwaysApply: true
+---
+
+# Commit each completed step
+
+In this repo, **commit after every finished step** (feature slice, test/bench,
+doc, rule, or bugfix). Do not wait for the user to say "commit".
+
+Message: 1–2 sentences on **why**, not a file list. Match recent `git log` tone.
+
+```
+Add export range-bias knobs so first-catch offset can be estimated or removed.
+```
+
+Do:
+
+- `git add` only the files for that step
+- `git status` / `git diff` / `git log` before the commit
+- Leave `build/`, `logs/`, `.env`, credentials, and binaries unstaged
+- One logical change per commit (do not mix CUDA-unrelated refactors)
+
+Do not:
+
+- `git config`, `--no-verify`, force push, or history rewrite unless asked
+- Amend a commit that is already on origin
+- Empty commits, or commit while the build/test for that step failed
+- Push unless the user asks (origin cleanup is an explicit ask)
+
+If the step is still mid-debug, keep working; commit when the slice is coherent.
